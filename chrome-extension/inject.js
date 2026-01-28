@@ -85,6 +85,21 @@
     /node_modules\/@nuxt/,
   ];
 
+  // Strip ANSI escape codes from strings
+  // Matches: ESC[...m, \x1b[...m, and bare [...m sequences
+  function stripAnsi(str) {
+    if (typeof str !== 'string') return str;
+    // Match ANSI escape sequences: ESC[ or \x1b[ followed by params and ending with letter
+    // Also match bare bracket sequences like [0m, [2;38;2;124;124;124m
+    return str
+      .replace(/\x1b\[[0-9;]*m/g, '')  // Standard ANSI escapes
+      .replace(/\u001b\[[0-9;]*m/g, '') // Unicode escape
+      .replace(/\033\[[0-9;]*m/g, '')   // Octal escape
+      .replace(/\[\d+(?:;\d+)*m/g, '')  // Bare bracket sequences like [0m or [2;38;2;124;124;124m
+      .replace(/%[sdifoOc]/g, '')       // Console format specifiers like %s, %d, etc.
+      .trim();
+  }
+
   // Deep serialize an object with circular reference handling
   function deepSerialize(obj, seen = new WeakSet(), depth = 0, maxDepth = 10) {
     // Prevent infinite recursion
@@ -95,7 +110,7 @@
     // Handle primitives
     if (obj === null) return null;
     if (obj === undefined) return undefined;
-    if (typeof obj === 'string') return obj;
+    if (typeof obj === 'string') return stripAnsi(obj);
     if (typeof obj === 'number') {
       if (Number.isNaN(obj)) return 'NaN';
       if (!Number.isFinite(obj)) return obj > 0 ? 'Infinity' : '-Infinity';
