@@ -22,7 +22,7 @@ A Chrome extension that captures console logs with **full object serialization**
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/console-log-copier.git
+   git clone https://github.com/NickAnthony/console-log-copier.git
    ```
 
 2. Open Chrome and go to `chrome://extensions/`
@@ -62,6 +62,20 @@ The extension properly serializes:
 - Error objects (with stack traces)
 - Circular references (detected and marked)
 - DOM elements (tagged representation)
+
+## Permissions
+
+This extension requires:
+- **activeTab** - Access the current tab to inject the console interceptor
+- **scripting** - Inject scripts into pages to capture console output
+- **storage** - Store captured logs per tab
+- **clipboardWrite** - Copy logs to clipboard
+
+The extension only activates on the current tab and does not send any data externally.
+
+## Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
 
 ## License
 
