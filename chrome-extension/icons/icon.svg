@@ -1,0 +1,8 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="128" height="128" rx="24" fill="#0a0a0b"/>
+  <!-- C letter - thick and bold -->
+  <path d="M88 36C80 26 68 20 54 20C28 20 12 42 12 64C12 86 28 108 54 108C68 108 80 102 88 92" stroke="#00ff9d" stroke-width="18" stroke-linecap="round"/>
+  <!-- Underscore cursor -->
+  <line x1="72" y1="92" x2="116" y2="92" stroke="#00ff9d" stroke-width="14" stroke-linecap="round"/>
+</svg>
