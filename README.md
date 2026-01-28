@@ -1,8 +1,8 @@
+![Console Log Copier](chrome-extension/icons/icon128.png)
+
 # Console Log Copier
 
 A Chrome extension that captures console logs with **full object serialization** - no more truncated `[Object]` in your copied logs. Filters out React/Node framework noise so you only get your actual console statements.
-
-![Console Log Copier](chrome-extension/icons/icon128.png)
 
 ## Features
 
