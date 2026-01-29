@@ -196,7 +196,7 @@ async function copyAllLogs() {
     return;
   }
 
-  const text = filteredLogs.map(formatLogForCopy).join('\n\n');
+  const text = filteredLogs.map(formatLogForCopy).join('\n');
   await copyToClipboard(text);
   showCopyStatus('Copied all logs!');
 }
