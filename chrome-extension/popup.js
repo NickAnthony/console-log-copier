@@ -256,8 +256,16 @@ async function init() {
   // Format selector
   document.getElementById('formatSelect').addEventListener('change', (e) => {
     currentFormat = e.target.value;
+    chrome.storage.local.set({ format: currentFormat });
     renderLogs(currentLogs);
   });
+
+  // Restore saved format
+  const stored = await chrome.storage.local.get('format');
+  if (stored.format) {
+    currentFormat = stored.format;
+    document.getElementById('formatSelect').value = currentFormat;
+  }
 
   // Initial load
   await refreshLogs();
