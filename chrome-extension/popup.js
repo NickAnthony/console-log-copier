@@ -145,6 +145,7 @@ function getActiveFilters() {
   if (document.getElementById('filterWarn').checked) filters.push('warn');
   if (document.getElementById('filterError').checked) filters.push('error');
   if (document.getElementById('filterDebug').checked) filters.push('debug');
+  if (document.getElementById('filterNetwork').checked) filters.push('network');
   // Also include table, dir, dirxml under their base types
   filters.push('table', 'dir', 'dirxml');
   return filters;
@@ -249,7 +250,7 @@ async function init() {
   document.getElementById('refreshBtn').addEventListener('click', refreshLogs);
 
   // Filter checkboxes
-  ['filterLog', 'filterInfo', 'filterWarn', 'filterError', 'filterDebug'].forEach(id => {
+  ['filterLog', 'filterInfo', 'filterWarn', 'filterError', 'filterDebug', 'filterNetwork'].forEach(id => {
     document.getElementById(id).addEventListener('change', () => renderLogs(currentLogs));
   });
 

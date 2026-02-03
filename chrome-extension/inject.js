@@ -345,6 +345,90 @@
   console.dir = interceptConsole('dir');
   console.dirxml = interceptConsole('dirxml');
 
+  // Dispatch a network error log
+  function dispatchNetworkError(details) {
+    try {
+      window.dispatchEvent(new CustomEvent('__CONSOLE_LOG_COPIER__', {
+        detail: {
+          level: 'network',
+          timestamp: new Date().toISOString(),
+          args: [deepSerialize(details)],
+          stack: null
+        }
+      }));
+    } catch (e) {
+      // Silently fail
+    }
+  }
+
+  // Intercept fetch for network errors
+  const originalFetch = window.fetch;
+  window.fetch = async function(...args) {
+    const url = args[0] instanceof Request ? args[0].url : String(args[0]);
+    const method = args[1]?.method || (args[0] instanceof Request ? args[0].method : 'GET');
+
+    try {
+      const response = await originalFetch.apply(this, args);
+
+      // Capture failed HTTP responses (4xx, 5xx)
+      if (!response.ok) {
+        dispatchNetworkError({
+          type: 'fetch',
+          method: method.toUpperCase(),
+          url: url,
+          status: response.status,
+          statusText: response.statusText
+        });
+      }
+
+      return response;
+    } catch (error) {
+      // Capture network failures (CORS, connection refused, etc.)
+      dispatchNetworkError({
+        type: 'fetch',
+        method: method.toUpperCase(),
+        url: url,
+        error: error.message
+      });
+      throw error;
+    }
+  };
+
+  // Intercept XMLHttpRequest for network errors
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  const originalXHRSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    this.__clc_method = method;
+    this.__clc_url = url;
+    return originalXHROpen.call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.send = function(...args) {
+    this.addEventListener('loadend', function() {
+      if (this.status >= 400 || this.status === 0) {
+        dispatchNetworkError({
+          type: 'xhr',
+          method: (this.__clc_method || 'GET').toUpperCase(),
+          url: this.__clc_url,
+          status: this.status,
+          statusText: this.statusText || (this.status === 0 ? 'Network Error' : '')
+        });
+      }
+    });
+
+    this.addEventListener('error', () => {
+      dispatchNetworkError({
+        type: 'xhr',
+        method: (this.__clc_method || 'GET').toUpperCase(),
+        url: this.__clc_url,
+        error: 'Network request failed'
+      });
+    });
+
+    return originalXHRSend.apply(this, args);
+  };
+
   // Mark that we've initialized
   window.__CONSOLE_LOG_COPIER_INITIALIZED__ = true;
 })();

@@ -27,6 +27,8 @@
   --error-red-bg: rgba(248, 113, 113, 0.1);
   --debug-purple: #c4b5fd;
   --debug-purple-bg: rgba(196, 181, 253, 0.1);
+  --network-orange: #fb923c;
+  --network-orange-bg: rgba(251, 146, 60, 0.1);
 
   /* Text hierarchy */
   --text-primary: #fafafa;
@@ -309,6 +311,12 @@ button {
   border-color: rgba(196, 181, 253, 0.3);
 }
 
+.chip-network input:checked + .chip-inner {
+  background: var(--network-orange-bg);
+  color: var(--network-orange);
+  border-color: rgba(251, 146, 60, 0.3);
+}
+
 .format-selector select {
   padding: 6px 28px 6px 10px;
   font-family: 'JetBrains Mono', monospace;
@@ -456,6 +464,11 @@ button {
 .log-level.debug {
   background: var(--debug-purple-bg);
   color: var(--debug-purple);
+}
+
+.log-level.network {
+  background: var(--network-orange-bg);
+  color: var(--network-orange);
 }
 
 .log-level.table,
