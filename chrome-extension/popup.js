@@ -250,8 +250,17 @@ async function init() {
   document.getElementById('refreshBtn').addEventListener('click', refreshLogs);
 
   // Filter checkboxes
-  ['filterLog', 'filterInfo', 'filterWarn', 'filterError', 'filterDebug', 'filterNetwork'].forEach(id => {
-    document.getElementById(id).addEventListener('change', () => renderLogs(currentLogs));
+  const filterIds = ['filterLog', 'filterInfo', 'filterWarn', 'filterError', 'filterDebug', 'filterNetwork'];
+  filterIds.forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      // Save filter preferences
+      const filters = {};
+      filterIds.forEach(fid => {
+        filters[fid] = document.getElementById(fid).checked;
+      });
+      chrome.storage.local.set({ filters });
+      renderLogs(currentLogs);
+    });
   });
 
   // Format selector
@@ -261,11 +270,18 @@ async function init() {
     renderLogs(currentLogs);
   });
 
-  // Restore saved format
-  const stored = await chrome.storage.local.get('format');
+  // Restore saved format and filters
+  const stored = await chrome.storage.local.get(['format', 'filters']);
   if (stored.format) {
     currentFormat = stored.format;
     document.getElementById('formatSelect').value = currentFormat;
+  }
+  if (stored.filters) {
+    filterIds.forEach(id => {
+      if (typeof stored.filters[id] === 'boolean') {
+        document.getElementById(id).checked = stored.filters[id];
+      }
+    });
   }
 
   // Initial load
