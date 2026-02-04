@@ -4,86 +4,52 @@
 (function() {
   'use strict';
 
-  // Patterns to filter out React/Node/framework noise
-  const FILTER_PATTERNS = [
-    // React warnings and errors
-    /^Warning:/,
-    /^Error: Minified React error/,
-    /react-dom/i,
-    /react\.development/i,
-    /react\.production/i,
-    /^The above error occurred in/,
-    /^Consider adding an error boundary/,
-    /^React does not recognize/,
-    /^Invalid prop/,
-    /^Failed prop type/,
-    /^Each child in a list should have a unique/,
-    /^Cannot update a component/,
-    /^Can't perform a React state update/,
-    /^findDOMNode is deprecated/,
-    /^Legacy context API/,
-    /^Unsafe lifecycle method/,
-    /componentWillMount has been renamed/,
-    /componentWillReceiveProps has been renamed/,
-    /componentWillUpdate has been renamed/,
+  // Categorized patterns for framework noise detection
+  const CATEGORIZED_FILTER_PATTERNS = {
+    react: [
+      /^Warning:/, /^Error: Minified React error/, /react-dom/i,
+      /react\.development/i, /react\.production/i,
+      /^The above error occurred in/, /^Consider adding an error boundary/,
+      /^React does not recognize/, /^Invalid prop/, /^Failed prop type/,
+      /^Each child in a list should have a unique/,
+      /^Cannot update a component/, /^Can't perform a React state update/,
+      /^findDOMNode is deprecated/, /^Legacy context API/,
+      /^Unsafe lifecycle method/, /componentWillMount has been renamed/,
+      /componentWillReceiveProps has been renamed/,
+      /componentWillUpdate has been renamed/,
+      /hydrat/i, /^Text content does not match/, /^Expected server HTML/,
+      /^Hydration failed/, /^There was an error while hydrating/,
+      /^An error occurred during hydration/,
+    ],
+    framework: [
+      /^\[vite\]/i, /^\[nuxt\]/i, /^\[vue/i, /^Vue warn/i,
+      /^\[Svelte/i, /^Angular is running/,
+      /^node:/, /^internal\//, /DeprecationWarning/, /ExperimentalWarning/,
+      /^Fast Refresh/, /^\[Fast Refresh\]/, /^next-dev\.js/,
+      /^Compiled/, /^Compiling/, /^wait.*compiling/i, /^event.*compiled/i,
+    ],
+    bundler: [
+      /^\[HMR\]/, /^\[webpack/, /^webpack:/, /^Hot Module Replacement/,
+    ],
+    devtools: [
+      /^Download the React DevTools/, /^Download the Apollo DevTools/,
+      /^Download the Redux DevTools/, /^%c/,
+    ],
+  };
 
-    // Hydration errors
-    /hydrat/i,
-    /^Text content does not match/,
-    /^Expected server HTML/,
-    /^Hydration failed/,
-    /^There was an error while hydrating/,
-    /^An error occurred during hydration/,
+  // Categorized stack trace patterns for framework internals
+  const CATEGORIZED_STACK_PATTERNS = {
+    react: [/node_modules\/react/, /node_modules\/react-dom/],
+    framework: [
+      /node_modules\/next/, /node_modules\/vue/, /node_modules\/nuxt/,
+      /node_modules\/@vue/, /node_modules\/@next/, /node_modules\/@nuxt/,
+    ],
+    bundler: [/node_modules\/webpack/],
+  };
 
-    // Next.js specific
-    /^Fast Refresh/,
-    /^\[Fast Refresh\]/,
-    /^next-dev\.js/,
-    /^\[HMR\]/,
-    /^Compiled/,
-    /^Compiling/,
-    /^wait.*compiling/i,
-    /^event.*compiled/i,
-
-    // Webpack/bundler noise
-    /^\[webpack/,
-    /^webpack:/,
-    /^\[HMR\]/,
-    /^Hot Module Replacement/,
-
-    // Node.js specific
-    /^node:/,
-    /^internal\//,
-    /DeprecationWarning/,
-    /ExperimentalWarning/,
-
-    // Browser DevTools noise
-    /^Download the React DevTools/,
-    /^Download the Apollo DevTools/,
-    /^Download the Redux DevTools/,
-    /^%c/,  // Styled console messages (usually from frameworks)
-
-    // Common framework debug messages
-    /^\[vite\]/i,
-    /^\[nuxt\]/i,
-    /^\[vue/i,
-    /^Vue warn/i,
-    /^\[Svelte/i,
-    /^Angular is running/,
-  ];
-
-  // Stack trace patterns that indicate framework internals
-  const FRAMEWORK_STACK_PATTERNS = [
-    /node_modules\/react/,
-    /node_modules\/react-dom/,
-    /node_modules\/next/,
-    /node_modules\/webpack/,
-    /node_modules\/vue/,
-    /node_modules\/nuxt/,
-    /node_modules\/@vue/,
-    /node_modules\/@next/,
-    /node_modules\/@nuxt/,
-  ];
+  // Hoist entries for performance (these run on every console call)
+  const FILTER_ENTRIES = Object.entries(CATEGORIZED_FILTER_PATTERNS);
+  const STACK_ENTRIES = Object.entries(CATEGORIZED_STACK_PATTERNS);
 
   // Strip ANSI escape codes from strings
   // Matches: ESC[...m, \x1b[...m, and bare [...m sequences
@@ -239,40 +205,41 @@
     return String(obj);
   }
 
-  // Check if a log should be filtered out
-  function shouldFilter(args, stack) {
-    if (!args || args.length === 0) return true;
+  // Determine the noise category for a log, or null if it's a normal user log
+  function getFilterCategory(args, stack) {
+    if (!args || args.length === 0) return 'devtools';
 
     const firstArg = args[0];
 
-    // Check if first argument matches filter patterns
+    // Check if first argument matches categorized filter patterns
     if (typeof firstArg === 'string') {
-      for (const pattern of FILTER_PATTERNS) {
-        if (pattern.test(firstArg)) {
-          return true;
+      for (const [category, patterns] of FILTER_ENTRIES) {
+        for (const pattern of patterns) {
+          if (pattern.test(firstArg)) {
+            return category;
+          }
         }
       }
     }
 
     // Check stack trace for framework internals
     if (stack) {
-      for (const pattern of FRAMEWORK_STACK_PATTERNS) {
-        if (pattern.test(stack)) {
-          // Only filter if it looks like an internal framework log
-          // User code that happens to be in a callback from framework code should still be captured
-          const stackLines = stack.split('\n');
-          // If the first non-error line is from a framework, filter it
-          const firstStackLine = stackLines.find(line =>
-            line.includes('at ') && !line.includes('deepSerialize') && !line.includes('interceptConsole')
-          );
-          if (firstStackLine && pattern.test(firstStackLine)) {
-            return true;
+      for (const [category, patterns] of STACK_ENTRIES) {
+        for (const pattern of patterns) {
+          if (pattern.test(stack)) {
+            const stackLines = stack.split('\n');
+            const firstStackLine = stackLines.find(line =>
+              line.includes('at ') && !line.includes('deepSerialize') && !line.includes('interceptConsole')
+            );
+            if (firstStackLine && pattern.test(firstStackLine)) {
+              return category;
+            }
           }
         }
       }
     }
 
-    return false;
+    return null;
   }
 
   // Get clean stack trace
@@ -311,11 +278,7 @@
 
       try {
         const stack = getCleanStack();
-
-        // Check if this should be filtered
-        if (shouldFilter(args, stack)) {
-          return;
-        }
+        const filterCategory = getFilterCategory(args, stack);
 
         // Deep serialize all arguments
         const serializedArgs = args.map(arg => deepSerialize(arg));
@@ -326,7 +289,8 @@
             level,
             timestamp: new Date().toISOString(),
             args: serializedArgs,
-            stack: stack
+            stack: stack,
+            filterCategory: filterCategory
           }
         }));
       } catch (e) {

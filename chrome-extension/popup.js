@@ -95,26 +95,28 @@ function highlightJSON(json) {
 }
 
 // Render logs to the container
-function renderLogs(logs) {
+function renderLogs() {
   const container = document.getElementById('logContainer');
-  const filters = getActiveFilters();
+  const visibleLogs = getVisibleLogs();
 
-  const filteredLogs = logs.filter(log => filters.includes(log.level));
-
-  if (filteredLogs.length === 0) {
+  if (visibleLogs.length === 0) {
     container.innerHTML = '<div class="empty-state">No logs captured yet</div>';
     document.getElementById('logCount').textContent = '0 logs';
     return;
   }
 
-  container.innerHTML = filteredLogs.map((log, index) => {
+  container.innerHTML = visibleLogs.map((log, index) => {
     const formattedContent = formatLogArgs(log.args, currentFormat);
     const highlighted = currentFormat !== 'text' ? highlightJSON(formattedContent) : escapeHtml(formattedContent);
+    const categoryBadge = log.filterCategory
+      ? `<span class="log-category ${log.filterCategory}">${log.filterCategory}</span>`
+      : '';
 
     return `
       <div class="log-entry" data-index="${index}">
         <div class="log-header" onclick="toggleLog(${index})">
           <span class="log-level ${log.level}">${log.level}</span>
+          ${categoryBadge}
           <span class="log-preview">${escapeHtml(getPreview(log.args))}</span>
           <span class="log-timestamp">${formatTimestamp(log.timestamp)}</span>
           <button class="copy-single" onclick="copySingleLog(event, ${index})" title="Copy this log">Copy</button>
@@ -127,7 +129,7 @@ function renderLogs(logs) {
     `;
   }).join('');
 
-  document.getElementById('logCount').textContent = `${filteredLogs.length} log${filteredLogs.length !== 1 ? 's' : ''}`;
+  document.getElementById('logCount').textContent = `${visibleLogs.length} log${visibleLogs.length !== 1 ? 's' : ''}`;
 }
 
 // Escape HTML to prevent XSS
@@ -151,6 +153,38 @@ function getActiveFilters() {
   return filters;
 }
 
+// Category filter IDs and helpers
+const categoryIds = ['categoryReact', 'categoryFramework', 'categoryBundler', 'categoryDevtools'];
+const categoryAllId = 'categoryAll';
+const categoryMap = {
+  categoryReact: 'react',
+  categoryFramework: 'framework',
+  categoryBundler: 'bundler',
+  categoryDevtools: 'devtools',
+};
+
+// Get active noise categories
+function getActiveCategories() {
+  const active = [];
+  for (const id of categoryIds) {
+    if (document.getElementById(id).checked) {
+      active.push(categoryMap[id]);
+    }
+  }
+  return active;
+}
+
+// Get logs filtered by both level and category
+function getVisibleLogs() {
+  const filters = getActiveFilters();
+  const activeCategories = getActiveCategories();
+  return currentLogs.filter(log => {
+    if (!filters.includes(log.level)) return false;
+    if (log.filterCategory) return activeCategories.includes(log.filterCategory);
+    return true;
+  });
+}
+
 // Toggle log body visibility
 window.toggleLog = function(index) {
   const body = document.getElementById(`log-body-${index}`);
@@ -163,9 +197,8 @@ window.toggleLog = function(index) {
 window.copySingleLog = async function(event, index) {
   event.stopPropagation();
 
-  const filters = getActiveFilters();
-  const filteredLogs = currentLogs.filter(log => filters.includes(log.level));
-  const log = filteredLogs[index];
+  const visibleLogs = getVisibleLogs();
+  const log = visibleLogs[index];
 
   if (!log) return;
 
@@ -189,15 +222,14 @@ function formatLogForCopy(log) {
 
 // Copy all logs to clipboard
 async function copyAllLogs() {
-  const filters = getActiveFilters();
-  const filteredLogs = currentLogs.filter(log => filters.includes(log.level));
+  const visibleLogs = getVisibleLogs();
 
-  if (filteredLogs.length === 0) {
+  if (visibleLogs.length === 0) {
     showCopyStatus('No logs to copy');
     return;
   }
 
-  const text = filteredLogs.map(formatLogForCopy).join('\n');
+  const text = visibleLogs.map(formatLogForCopy).join('\n');
   await copyToClipboard(text);
   showCopyStatus('Copied all logs!');
 }
@@ -233,7 +265,7 @@ async function refreshLogs() {
   // Only re-render if logs have changed
   if (JSON.stringify(newLogs) !== JSON.stringify(currentLogs)) {
     currentLogs = newLogs;
-    renderLogs(currentLogs);
+    renderLogs();
   }
 }
 
@@ -244,7 +276,7 @@ async function init() {
   document.getElementById('clearBtn').addEventListener('click', async () => {
     await clearLogs();
     currentLogs = [];
-    renderLogs([]);
+    renderLogs();
     showCopyStatus('Cleared!');
   });
   document.getElementById('refreshBtn').addEventListener('click', refreshLogs);
@@ -259,19 +291,55 @@ async function init() {
         filters[fid] = document.getElementById(fid).checked;
       });
       chrome.storage.local.set({ filters });
-      renderLogs(currentLogs);
+      renderLogs();
     });
+  });
+
+  // Category checkboxes
+  function saveCategoryFilters() {
+    const catFilters = {};
+    categoryIds.forEach(id => {
+      catFilters[id] = document.getElementById(id).checked;
+    });
+    chrome.storage.local.set({ categoryFilters: catFilters });
+  }
+
+  function updateCategoryAllState() {
+    const allEl = document.getElementById(categoryAllId);
+    const states = categoryIds.map(id => document.getElementById(id).checked);
+    const allChecked = states.every(Boolean);
+    const someChecked = states.some(Boolean);
+    allEl.checked = allChecked;
+    allEl.indeterminate = !allChecked && someChecked;
+  }
+
+  categoryIds.forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      updateCategoryAllState();
+      saveCategoryFilters();
+      renderLogs();
+    });
+  });
+
+  document.getElementById(categoryAllId).addEventListener('change', () => {
+    const checked = document.getElementById(categoryAllId).checked;
+    categoryIds.forEach(id => {
+      document.getElementById(id).checked = checked;
+    });
+    document.getElementById(categoryAllId).indeterminate = false;
+    saveCategoryFilters();
+    renderLogs();
   });
 
   // Format selector
   document.getElementById('formatSelect').addEventListener('change', (e) => {
     currentFormat = e.target.value;
     chrome.storage.local.set({ format: currentFormat });
-    renderLogs(currentLogs);
+    renderLogs();
   });
 
-  // Restore saved format and filters
-  const stored = await chrome.storage.local.get(['format', 'filters']);
+  // Restore saved format, filters, and category filters
+  const stored = await chrome.storage.local.get(['format', 'filters', 'categoryFilters']);
   if (stored.format) {
     currentFormat = stored.format;
     document.getElementById('formatSelect').value = currentFormat;
@@ -282,6 +350,14 @@ async function init() {
         document.getElementById(id).checked = stored.filters[id];
       }
     });
+  }
+  if (stored.categoryFilters) {
+    categoryIds.forEach(id => {
+      if (typeof stored.categoryFilters[id] === 'boolean') {
+        document.getElementById(id).checked = stored.categoryFilters[id];
+      }
+    });
+    updateCategoryAllState();
   }
 
   // Initial load

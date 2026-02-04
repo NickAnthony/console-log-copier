@@ -17,7 +17,8 @@
       level: data.level,
       timestamp: data.timestamp,
       args: data.args,
-      stack: data.stack
+      stack: data.stack,
+      filterCategory: data.filterCategory || null
     });
   });
 })();

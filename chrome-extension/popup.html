@@ -52,7 +52,7 @@
 
     <div class="toolbar">
       <div class="filters">
-        <span class="filter-label">FILTER</span>
+        <span class="filter-label">LEVEL</span>
         <div class="filter-chips">
           <label class="chip chip-log">
             <input type="checkbox" id="filterLog" checked>
@@ -86,6 +86,35 @@
           <option value="compact">Compact</option>
           <option value="text">Text</option>
         </select>
+      </div>
+    </div>
+
+    <div class="toolbar toolbar-categories">
+      <div class="filters">
+        <span class="filter-label">SOURCE</span>
+        <div class="filter-chips">
+          <label class="chip chip-select-all">
+            <input type="checkbox" id="categoryAll">
+            <span class="chip-inner">all</span>
+          </label>
+          <span class="filter-divider"></span>
+          <label class="chip chip-react">
+            <input type="checkbox" id="categoryReact">
+            <span class="chip-inner">react</span>
+          </label>
+          <label class="chip chip-framework">
+            <input type="checkbox" id="categoryFramework">
+            <span class="chip-inner">framework</span>
+          </label>
+          <label class="chip chip-bundler">
+            <input type="checkbox" id="categoryBundler">
+            <span class="chip-inner">bundler</span>
+          </label>
+          <label class="chip chip-devtools">
+            <input type="checkbox" id="categoryDevtools">
+            <span class="chip-inner">devtools</span>
+          </label>
+        </div>
       </div>
     </div>
 

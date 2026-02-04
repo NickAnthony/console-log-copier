@@ -30,6 +30,18 @@
   --network-orange: #fb923c;
   --network-orange-bg: rgba(251, 146, 60, 0.1);
 
+  /* Category colors */
+  --cat-react: #61dafb;
+  --cat-react-bg: rgba(97, 218, 251, 0.1);
+  --cat-framework: #a78bfa;
+  --cat-framework-bg: rgba(167, 139, 250, 0.1);
+  --cat-bundler: #f472b6;
+  --cat-bundler-bg: rgba(244, 114, 182, 0.1);
+  --cat-devtools: #818cf8;
+  --cat-devtools-bg: rgba(129, 140, 248, 0.1);
+  --cat-all: var(--phosphor);
+  --cat-all-bg: var(--phosphor-subtle);
+
   /* Text hierarchy */
   --text-primary: #fafafa;
   --text-secondary: #a1a1aa;
@@ -317,6 +329,86 @@ button {
   border-color: rgba(251, 146, 60, 0.3);
 }
 
+/* Category chip checked states */
+.chip-select-all input:checked + .chip-inner {
+  background: var(--cat-all-bg);
+  color: var(--cat-all);
+  border-color: rgba(0, 255, 157, 0.3);
+}
+
+.chip-react input:checked + .chip-inner {
+  background: var(--cat-react-bg);
+  color: var(--cat-react);
+  border-color: rgba(97, 218, 251, 0.3);
+}
+
+.chip-framework input:checked + .chip-inner {
+  background: var(--cat-framework-bg);
+  color: var(--cat-framework);
+  border-color: rgba(167, 139, 250, 0.3);
+}
+
+.chip-bundler input:checked + .chip-inner {
+  background: var(--cat-bundler-bg);
+  color: var(--cat-bundler);
+  border-color: rgba(244, 114, 182, 0.3);
+}
+
+.chip-devtools input:checked + .chip-inner {
+  background: var(--cat-devtools-bg);
+  color: var(--cat-devtools);
+  border-color: rgba(129, 140, 248, 0.3);
+}
+
+/* Filter divider between "all" and individual category chips */
+.filter-divider {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: var(--border-visible);
+  margin: 0 4px;
+  vertical-align: middle;
+}
+
+/* Category toolbar - tighter, no top border */
+.toolbar-categories {
+  padding: 6px 16px;
+  border-top: none;
+}
+
+/* Category badge on noise log entries */
+.log-category {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: lowercase;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+
+.log-category.react {
+  background: var(--cat-react-bg);
+  color: var(--cat-react);
+}
+
+.log-category.framework {
+  background: var(--cat-framework-bg);
+  color: var(--cat-framework);
+}
+
+.log-category.bundler {
+  background: var(--cat-bundler-bg);
+  color: var(--cat-bundler);
+}
+
+.log-category.devtools {
+  background: var(--cat-devtools-bg);
+  color: var(--cat-devtools);
+}
+
 .format-selector select {
   padding: 6px 28px 6px 10px;
   font-family: 'JetBrains Mono', monospace;
@@ -353,7 +445,7 @@ button {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
-  min-height: 260px;
+  min-height: 240px;
   max-height: 420px;
   background: var(--bg-void);
 }

@@ -34,7 +34,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         level: message.level,
         timestamp: message.timestamp,
         args: message.args,
-        stack: message.stack
+        stack: message.stack,
+        filterCategory: message.filterCategory || null
       });
       // Keep only last 1000 logs per tab
       if (logs.length > 1000) {
