@@ -393,6 +393,29 @@
     return originalXHRSend.apply(this, args);
   };
 
+  // Intercept EventSource for network errors (SSE connections)
+  const OriginalEventSource = window.EventSource;
+  if (OriginalEventSource) {
+    window.EventSource = function(url, options) {
+      const es = new OriginalEventSource(url, options);
+
+      es.addEventListener('error', () => {
+        dispatchNetworkError({
+          type: 'eventsource',
+          method: 'GET',
+          url: typeof url === 'string' ? url : String(url),
+          error: 'EventSource connection failed'
+        });
+      });
+
+      return es;
+    };
+    window.EventSource.prototype = OriginalEventSource.prototype;
+    Object.defineProperty(window.EventSource, 'CONNECTING', { value: 0 });
+    Object.defineProperty(window.EventSource, 'OPEN', { value: 1 });
+    Object.defineProperty(window.EventSource, 'CLOSED', { value: 2 });
+  }
+
   // Mark that we've initialized
   window.__CONSOLE_LOG_COPIER_INITIALIZED__ = true;
 })();
