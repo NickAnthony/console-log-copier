@@ -46,14 +46,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove(`logs_${tabId}`);
 });
 
-// Clean up when tab navigates
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
-    tabLogs.set(tabId, []);
-    dirtyTabs.add(tabId);
-    scheduleFlush();
-  }
-});
+// Note: we intentionally do NOT clear logs on tab navigation so that
+// logs survive page refreshes.  Users can clear manually via the popup.
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
