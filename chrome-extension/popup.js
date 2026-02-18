@@ -2,6 +2,7 @@
 
 let currentLogs = [];
 let currentFormat = 'pretty';
+let currentSearch = '';
 
 // Get current tab ID
 async function getCurrentTabId() {
@@ -174,13 +175,27 @@ function getActiveCategories() {
   return active;
 }
 
-// Get logs filtered by both level and category
+// Check if a log matches the current search query
+function matchesSearch(log, query) {
+  if (!query) return true;
+  const lower = query.toLowerCase();
+  // Search across level, timestamp, and all args
+  if (log.level.toLowerCase().includes(lower)) return true;
+  for (const arg of log.args) {
+    const text = typeof arg === 'string' ? arg : JSON.stringify(arg);
+    if (text.toLowerCase().includes(lower)) return true;
+  }
+  return false;
+}
+
+// Get logs filtered by level, category, and search
 function getVisibleLogs() {
   const filters = getActiveFilters();
   const activeCategories = getActiveCategories();
   return currentLogs.filter(log => {
     if (!filters.includes(log.level)) return false;
-    if (log.filterCategory) return activeCategories.includes(log.filterCategory);
+    if (log.filterCategory && !activeCategories.includes(log.filterCategory)) return false;
+    if (!matchesSearch(log, currentSearch)) return false;
     return true;
   });
 }
@@ -280,6 +295,28 @@ async function init() {
     showCopyStatus('Cleared!');
   });
   document.getElementById('refreshBtn').addEventListener('click', refreshLogs);
+
+  // Search input
+  const searchInput = document.getElementById('searchInput');
+  const searchClear = document.getElementById('searchClear');
+  let searchTimeout;
+
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      currentSearch = searchInput.value;
+      searchClear.classList.toggle('visible', currentSearch.length > 0);
+      renderLogs();
+    }, 150);
+  });
+
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    currentSearch = '';
+    searchClear.classList.remove('visible');
+    renderLogs();
+    searchInput.focus();
+  });
 
   // Filter checkboxes
   const filterIds = ['filterLog', 'filterInfo', 'filterWarn', 'filterError', 'filterDebug', 'filterNetwork'];
