@@ -71,8 +71,9 @@
 
 body {
   width: 520px;
-  min-height: 420px;
-  max-height: 620px;
+  height: 520px;
+  min-width: 360px;
+  min-height: 320px;
   font-family: 'Outfit', -apple-system, sans-serif;
   font-size: 13px;
   background: var(--bg-void);
@@ -103,7 +104,6 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-height: 620px;
   position: relative;
 }
 
@@ -515,8 +515,7 @@ button {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
-  min-height: 240px;
-  max-height: 420px;
+  min-height: 0;
   background: var(--bg-void);
 }
 
@@ -732,6 +731,7 @@ button {
 .json-null {
   color: var(--syntax-null);
 }
+
 
 /* ═══════════════════════════════════════════════════════════════
    FOOTER
