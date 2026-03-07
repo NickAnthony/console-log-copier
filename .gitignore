@@ -3,7 +3,7 @@
 
 # Claude Code
 .claude/
-!.claude/skills/
+!.claude/commands/
 .mcp.json
 
 # Editor
