@@ -17,3 +17,6 @@ npm-debug.log
 
 # Build artifacts
 *.zip
+
+# MCP server database
+mcp-server/console_logs.db
