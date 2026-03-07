@@ -7,8 +7,7 @@
     "activeTab",
     "scripting",
     "storage",
-    "clipboardWrite",
-    "webNavigation"
+    "clipboardWrite"
   ],
   "host_permissions": [
     "http://localhost/*",
