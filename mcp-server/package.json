@@ -1,0 +1,12 @@
+{
+  "name": "console-log-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for querying browser console logs",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^11.8.2",
+    "ws": "^8.18.0"
+  }
+}
