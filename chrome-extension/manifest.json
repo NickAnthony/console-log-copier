@@ -5,7 +5,6 @@
   "description": "Copy console logs with full object data to clipboard, filtering out React/Node noise",
   "permissions": [
     "activeTab",
-    "scripting",
     "storage",
     "clipboardWrite"
   ],
