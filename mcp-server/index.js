@@ -120,8 +120,18 @@ for (const row of db.prepare(`SELECT tab_id, id FROM sessions WHERE is_active = 
 
 // --- WebSocket Server ---
 
-const wss = new WebSocketServer({ port: WS_PORT });
 const wsClients = new Set();
+const wss = new WebSocketServer({ port: WS_PORT });
+
+wss.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    // Another MCP server instance owns the WebSocket — this instance
+    // still works for MCP tool queries against the shared SQLite DB.
+    console.error(`WebSocket port ${WS_PORT} already in use, running in MCP-only mode`);
+  } else {
+    console.error('WebSocket server error:', err);
+  }
+});
 
 function broadcastToExtension(message) {
   const data = JSON.stringify(message);
