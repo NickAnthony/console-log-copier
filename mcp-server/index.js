@@ -1,13 +1,18 @@
+#!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import Database from 'better-sqlite3';
 import { WebSocketServer } from 'ws';
 import path from 'path';
+import os from 'os';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, 'console_logs.db');
+// Store DB in ~/.console-log-mcp/ so it persists across npx runs
+const DATA_DIR = process.env.CONSOLE_LOG_MCP_DATA_DIR || path.join(os.homedir(), '.console-log-mcp');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, 'console_logs.db');
 const WS_PORT = parseInt(process.env.WS_PORT || '18462', 10);
 const RETENTION_DAYS = 7;
 

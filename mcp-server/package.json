@@ -1,9 +1,27 @@
 {
   "name": "console-log-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for querying browser console logs",
+  "description": "MCP server for querying browser console logs captured by the Console Log Copier Chrome extension",
   "main": "index.js",
   "type": "module",
+  "bin": {
+    "console-log-mcp-server": "index.js"
+  },
+  "keywords": [
+    "mcp",
+    "console",
+    "logs",
+    "chrome-extension",
+    "debugging"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NickAnthony/console-log-copier"
+  },
+  "files": [
+    "index.js"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "better-sqlite3": "^11.8.2",
