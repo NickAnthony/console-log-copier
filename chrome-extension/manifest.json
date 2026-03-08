@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "storage",
-    "clipboardWrite"
+    "clipboardWrite",
+    "webNavigation"
   ],
   "host_permissions": [
     "http://localhost/*",
