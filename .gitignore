@@ -21,3 +21,5 @@ npm-debug.log
 
 # MCP server database
 mcp-server/console_logs.db
+mcp-server/console_logs.db-shm
+mcp-server/console_logs.db-wal
