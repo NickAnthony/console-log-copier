@@ -49,10 +49,14 @@ const WS_URL = 'ws://127.0.0.1:18462';
 let ws = null;
 let wsReconnectDelay = 1000;
 const WS_MAX_RECONNECT_DELAY = 30000;
+let wsQueue = [];
 
 function wsSend(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
+  } else {
+    // Queue messages while connecting — they'll flush on open
+    wsQueue.push(msg);
   }
 }
 
@@ -66,6 +70,11 @@ function wsConnect() {
 
   ws.onopen = () => {
     wsReconnectDelay = 1000;
+    // Flush any messages queued while connecting
+    for (const queued of wsQueue) {
+      ws.send(JSON.stringify(queued));
+    }
+    wsQueue = [];
     // Send full sync of all current tabs
     ready.then(() => {
       const tabs = {};
