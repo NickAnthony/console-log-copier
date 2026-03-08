@@ -19,9 +19,9 @@ The extension requests the following permissions, used solely for its core funct
 | Permission | Purpose |
 |---|---|
 | `activeTab` | Access the current tab to capture console output |
-| `scripting` | Inject the console interceptor into the page |
 | `storage` | Store captured logs locally per tab |
 | `clipboardWrite` | Copy logs to the clipboard when requested by the user |
+| `webNavigation` | Detect page loads to create log sessions for the MCP server |
 
 ## Third-Party Services
 
