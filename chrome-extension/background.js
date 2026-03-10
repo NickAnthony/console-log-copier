@@ -151,21 +151,31 @@ wsConnect();
 
 // --- Page Load Detection ---
 
-chrome.webNavigation.onCommitted.addListener((details) => {
+function handleNavigation(details) {
   // Only track main frame navigations (not iframes)
   if (details.frameId !== 0) return;
   // Ignore about:, chrome:, etc.
   if (!details.url || details.url.startsWith('chrome://') || details.url.startsWith('about:')) return;
 
   const tabId = details.tabId;
+  const prevUrl = tabUrls.get(tabId);
   tabUrls.set(tabId, details.url);
+
+  // Skip if URL hasn't actually changed (avoids duplicate sessions)
+  if (prevUrl === details.url) return;
 
   // Get tab title (may not be available yet, but try)
   chrome.tabs.get(tabId, (tab) => {
     const title = chrome.runtime.lastError ? null : (tab?.title || null);
     wsSend({ type: 'NEW_SESSION', tabId, url: details.url, title });
   });
-});
+}
+
+// Full page loads (navigation, reload)
+chrome.webNavigation.onCommitted.addListener(handleNavigation);
+
+// SPA navigations (pushState, replaceState)
+chrome.webNavigation.onHistoryStateUpdated.addListener(handleNavigation);
 
 // Clean up when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
