@@ -227,6 +227,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_WS_STATUS') {
+    sendResponse({ connected: ws !== null && ws.readyState === WebSocket.OPEN });
+    return;
+  }
+
   if (message.type === 'CLEAR_LOGS') {
     ready.then(() => {
       tabLogs.set(message.tabId, []);

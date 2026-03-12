@@ -397,11 +397,24 @@ async function init() {
     updateCategoryAllState();
   }
 
+  // WebSocket status polling
+  async function updateWsStatus() {
+    chrome.runtime.sendMessage({ type: 'GET_WS_STATUS' }, (response) => {
+      const el = document.getElementById('wsStatus');
+      const connected = response?.connected ?? false;
+      el.classList.toggle('connected', connected);
+      el.classList.toggle('disconnected', !connected);
+      el.title = connected ? 'MCP server connected' : 'MCP server disconnected';
+    });
+  }
+
   // Initial load
   await refreshLogs();
+  updateWsStatus();
 
   // Auto-refresh every 2 seconds
   setInterval(refreshLogs, 2000);
+  setInterval(updateWsStatus, 3000);
 }
 
 // Start
