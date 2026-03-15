@@ -401,10 +401,14 @@ async function init() {
   async function updateWsStatus() {
     chrome.runtime.sendMessage({ type: 'GET_WS_STATUS' }, (response) => {
       const el = document.getElementById('wsStatus');
+      const queueEl = document.getElementById('wsQueueCount');
       const connected = response?.connected ?? false;
+      const queuedCount = response?.queuedCount ?? 0;
       el.classList.toggle('connected', connected);
       el.classList.toggle('disconnected', !connected);
-      el.title = connected ? 'MCP server connected' : 'MCP server disconnected';
+      el.classList.toggle('has-queue', queuedCount > 0);
+      el.title = response?.title || (connected ? 'MCP server connected' : 'MCP server disconnected');
+      queueEl.textContent = queuedCount > 0 ? `Q${queuedCount}` : '';
     });
   }
 

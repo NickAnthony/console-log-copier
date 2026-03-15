@@ -828,6 +828,17 @@ footer {
   transition: color var(--transition-normal) ease;
 }
 
+.ws-queue-count {
+  display: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.ws-status.has-queue .ws-queue-count {
+  display: inline;
+}
+
 .ws-status.connected {
   border-color: rgba(0, 255, 157, 0.2);
   background: rgba(0, 255, 157, 0.05);
@@ -839,6 +850,10 @@ footer {
 }
 
 .ws-status.connected .ws-label {
+  color: var(--phosphor-dim);
+}
+
+.ws-status.connected.has-queue .ws-queue-count {
   color: var(--phosphor-dim);
 }
 
@@ -854,6 +869,10 @@ footer {
 
 .ws-status.disconnected .ws-label {
   color: var(--text-muted);
+}
+
+.ws-status.disconnected.has-queue .ws-queue-count {
+  color: rgba(248, 113, 113, 0.85);
 }
 
 @keyframes fadeIn {

@@ -44,6 +44,12 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS processed_messages (
+    message_id TEXT PRIMARY KEY,
+    message_type TEXT NOT NULL,
+    processed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_url ON sessions(url);
   CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
@@ -56,6 +62,7 @@ db.prepare(`
   )
 `).run(`-${RETENTION_DAYS} days`);
 db.prepare(`DELETE FROM sessions WHERE started_at < datetime('now', ?)`).run(`-${RETENTION_DAYS} days`);
+db.prepare(`DELETE FROM processed_messages WHERE processed_at < datetime('now', ?)`).run(`-${RETENTION_DAYS} days`);
 
 // --- Prepared Statements ---
 
@@ -112,6 +119,10 @@ const stmts = {
   getAllActiveTabIds: db.prepare(`
     SELECT DISTINCT tab_id FROM sessions WHERE is_active = 1
   `),
+  markMessageProcessed: db.prepare(`
+    INSERT OR IGNORE INTO processed_messages (message_id, message_type)
+    VALUES (?, ?)
+  `),
 };
 
 // --- Tab-to-Session mapping (in-memory cache for fast lookup) ---
@@ -158,6 +169,10 @@ wss.on('connection', (ws) => {
       return;
     }
     handleExtensionMessage(msg);
+
+    if (msg.messageId) {
+      ws.send(JSON.stringify({ type: 'ACK', messageId: msg.messageId }));
+    }
   });
 
   ws.on('close', () => {
@@ -166,6 +181,13 @@ wss.on('connection', (ws) => {
 });
 
 function handleExtensionMessage(msg) {
+  if (msg.messageId) {
+    const result = stmts.markMessageProcessed.run(msg.messageId, msg.type || 'UNKNOWN');
+    if (result.changes === 0) {
+      return;
+    }
+  }
+
   switch (msg.type) {
     case 'NEW_SESSION': {
       const { tabId, url, title } = msg;
