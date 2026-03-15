@@ -148,7 +148,14 @@
         <span class="pulse"></span>
         <span id="logCount">0 entries</span>
       </div>
-      <span id="copyStatus" class="copy-status"></span>
+      <div class="status-right">
+        <span id="copyStatus" class="copy-status"></span>
+        <span id="wsStatus" class="ws-status disconnected" title="MCP server disconnected">
+          <span class="ws-dot"></span>
+          <span class="ws-label">MCP</span>
+          <span id="wsQueueCount" class="ws-queue-count"></span>
+        </span>
+      </div>
     </footer>
   </div>
   <script src="popup.js"></script>

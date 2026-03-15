@@ -788,12 +788,91 @@ footer {
   color: var(--text-muted);
 }
 
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .copy-status {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   font-weight: 500;
   color: var(--phosphor);
   animation: fadeIn 0.2s ease;
+}
+
+/* WebSocket connection indicator */
+.ws-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  transition: all var(--transition-normal) ease;
+}
+
+.ws-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transition: all var(--transition-normal) ease;
+}
+
+.ws-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  transition: color var(--transition-normal) ease;
+}
+
+.ws-queue-count {
+  display: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.ws-status.has-queue .ws-queue-count {
+  display: inline;
+}
+
+.ws-status.connected {
+  border-color: rgba(0, 255, 157, 0.2);
+  background: rgba(0, 255, 157, 0.05);
+}
+
+.ws-status.connected .ws-dot {
+  background: var(--phosphor);
+  box-shadow: 0 0 6px var(--phosphor);
+}
+
+.ws-status.connected .ws-label {
+  color: var(--phosphor-dim);
+}
+
+.ws-status.connected.has-queue .ws-queue-count {
+  color: var(--phosphor-dim);
+}
+
+.ws-status.disconnected {
+  border-color: rgba(248, 113, 113, 0.2);
+  background: rgba(248, 113, 113, 0.05);
+}
+
+.ws-status.disconnected .ws-dot {
+  background: var(--error-red);
+  opacity: 0.6;
+}
+
+.ws-status.disconnected .ws-label {
+  color: var(--text-muted);
+}
+
+.ws-status.disconnected.has-queue .ws-queue-count {
+  color: rgba(248, 113, 113, 0.85);
 }
 
 @keyframes fadeIn {

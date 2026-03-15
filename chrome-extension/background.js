@@ -6,18 +6,44 @@ const tabLogs = new Map();
 let dirtyTabs = new Set();
 let flushTimer = null;
 
+const STORAGE_KEYS = {
+  wsQueue: 'ws_queue',
+};
+
 // Track current URL per tab for MCP session management
 const tabUrls = new Map();
 
-// Restore logs from session storage when the service worker wakes up
+const wsState = {
+  connected: false,
+  queuedCount: 0,
+  reconnectDelay: 1000,
+  reconnectAttempts: 0,
+  lastConnectedAt: null,
+  lastDisconnectedAt: null,
+  lastError: null,
+  lastAckedAt: null,
+};
+
+function persistWsQueue() {
+  wsState.queuedCount = wsQueue.length;
+  chrome.storage.session.set({ [STORAGE_KEYS.wsQueue]: wsQueue });
+}
+
+// Restore logs and WS queue from session storage when the service worker wakes up
 const ready = new Promise((resolve) => {
   chrome.storage.session.get(null, (result) => {
     for (const [key, value] of Object.entries(result || {})) {
       if (key.startsWith('logs_')) {
-        const tabId = parseInt(key.slice(5));
+        const tabId = parseInt(key.slice(5), 10);
         tabLogs.set(tabId, value);
       }
     }
+
+    if (Array.isArray(result?.[STORAGE_KEYS.wsQueue])) {
+      wsQueue = result[STORAGE_KEYS.wsQueue];
+      wsState.queuedCount = wsQueue.length;
+    }
+
     resolve();
   });
 });
@@ -50,31 +76,104 @@ let ws = null;
 let wsReconnectDelay = 1000;
 const WS_MAX_RECONNECT_DELAY = 30000;
 let wsQueue = [];
+let wsReconnectTimer = null;
+let inFlightMessageIds = new Set();
 
-function wsSend(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
-  } else {
-    // Queue messages while connecting — they'll flush on open
-    wsQueue.push(msg);
+function enqueueWsMessage(msg) {
+  const envelope = {
+    ...msg,
+    messageId: crypto.randomUUID(),
+  };
+
+  wsQueue.push(envelope);
+  persistWsQueue();
+  flushWsQueue();
+}
+
+function sendQueuedMessage(msg) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(msg));
+  inFlightMessageIds.add(msg.messageId);
+}
+
+function flushWsQueue() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  for (const queued of wsQueue) {
+    if (!inFlightMessageIds.has(queued.messageId)) {
+      sendQueuedMessage(queued);
+    }
   }
 }
 
+function acknowledgeMessage(messageId) {
+  const nextQueue = wsQueue.filter(msg => msg.messageId !== messageId);
+  if (nextQueue.length === wsQueue.length) return;
+
+  wsQueue = nextQueue;
+  inFlightMessageIds.delete(messageId);
+  wsState.lastAckedAt = new Date().toISOString();
+  persistWsQueue();
+}
+
+function formatWsStatusTitle() {
+  const parts = [
+    wsState.connected ? 'MCP server connected' : 'MCP server disconnected',
+    `Queued: ${wsState.queuedCount}`,
+  ];
+
+  if (wsState.lastConnectedAt) {
+    parts.push(`Last connected: ${wsState.lastConnectedAt}`);
+  }
+  if (wsState.lastDisconnectedAt) {
+    parts.push(`Last disconnected: ${wsState.lastDisconnectedAt}`);
+  }
+  if (wsState.lastAckedAt) {
+    parts.push(`Last delivered: ${wsState.lastAckedAt}`);
+  }
+  if (wsState.lastError) {
+    parts.push(`Last error: ${wsState.lastError}`);
+  }
+
+  return parts.join('\n');
+}
+
+function getWsStatus() {
+  return {
+    ...wsState,
+    connected: ws !== null && ws.readyState === WebSocket.OPEN,
+    reconnectDelay: wsReconnectDelay,
+    title: formatWsStatusTitle(),
+  };
+}
+
 function wsConnect() {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    return;
+  }
+
   try {
     ws = new WebSocket(WS_URL);
-  } catch {
+  } catch (error) {
+    wsState.lastError = error?.message || 'Failed to construct WebSocket';
     scheduleWsReconnect();
     return;
   }
 
   ws.onopen = () => {
-    wsReconnectDelay = 1000;
-    // Flush any messages queued while connecting
-    for (const queued of wsQueue) {
-      ws.send(JSON.stringify(queued));
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
     }
-    wsQueue = [];
+    wsReconnectDelay = 1000;
+    wsState.connected = true;
+    wsState.reconnectAttempts = 0;
+    wsState.lastConnectedAt = new Date().toISOString();
+    wsState.lastError = null;
+    inFlightMessageIds.clear();
+
+    // Flush any messages queued while disconnected
+    flushWsQueue();
+
     // Send full sync of all current tabs
     ready.then(() => {
       const tabs = {};
@@ -94,7 +193,7 @@ function wsConnect() {
             tabUrls.set(tab.id, tab.url || 'unknown');
           }
         }
-        wsSend({ type: 'FULL_SYNC', tabs });
+        enqueueWsMessage({ type: 'FULL_SYNC', tabs });
       });
     });
   };
@@ -106,21 +205,33 @@ function wsConnect() {
     } catch {
       return;
     }
+    if (msg.type === 'ACK' && msg.messageId) {
+      acknowledgeMessage(msg.messageId);
+      return;
+    }
     handleServerMessage(msg);
   };
 
   ws.onclose = () => {
+    wsState.connected = false;
+    wsState.lastDisconnectedAt = new Date().toISOString();
     ws = null;
+    inFlightMessageIds.clear();
     scheduleWsReconnect();
   };
 
-  ws.onerror = () => {
+  ws.onerror = (event) => {
+    wsState.lastError = event?.message || 'WebSocket error';
     // onclose will fire after this
   };
 }
 
 function scheduleWsReconnect() {
-  setTimeout(() => {
+  if (wsReconnectTimer) return;
+
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    wsState.reconnectAttempts += 1;
     wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
     wsConnect();
   }, wsReconnectDelay);
@@ -151,28 +262,52 @@ wsConnect();
 
 // --- Page Load Detection ---
 
-chrome.webNavigation.onCommitted.addListener((details) => {
+function isTrackableUrl(url) {
+  return url && !url.startsWith('chrome://') && !url.startsWith('about:');
+}
+
+function sendNewSession(tabId, url) {
+  chrome.tabs.get(tabId, (tab) => {
+    const title = chrome.runtime.lastError ? null : (tab?.title || null);
+    enqueueWsMessage({ type: 'NEW_SESSION', tabId, url, title });
+  });
+}
+
+function handleCommittedNavigation(details) {
   // Only track main frame navigations (not iframes)
   if (details.frameId !== 0) return;
   // Ignore about:, chrome:, etc.
-  if (!details.url || details.url.startsWith('chrome://') || details.url.startsWith('about:')) return;
+  if (!isTrackableUrl(details.url)) return;
 
   const tabId = details.tabId;
   tabUrls.set(tabId, details.url);
+  sendNewSession(tabId, details.url);
+}
 
-  // Get tab title (may not be available yet, but try)
-  chrome.tabs.get(tabId, (tab) => {
-    const title = chrome.runtime.lastError ? null : (tab?.title || null);
-    wsSend({ type: 'NEW_SESSION', tabId, url: details.url, title });
-  });
-});
+function handleHistoryNavigation(details) {
+  if (details.frameId !== 0) return;
+  if (!isTrackableUrl(details.url)) return;
+
+  const tabId = details.tabId;
+  const prevUrl = tabUrls.get(tabId);
+  tabUrls.set(tabId, details.url);
+
+  if (prevUrl === details.url) return;
+  sendNewSession(tabId, details.url);
+}
+
+// Full page loads (navigation, reload)
+chrome.webNavigation.onCommitted.addListener(handleCommittedNavigation);
+
+// SPA navigations (pushState, replaceState)
+chrome.webNavigation.onHistoryStateUpdated.addListener(handleHistoryNavigation);
 
 // Clean up when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabLogs.delete(tabId);
   tabUrls.delete(tabId);
   chrome.storage.session.remove(`logs_${tabId}`);
-  wsSend({ type: 'TAB_CLOSED', tabId });
+  enqueueWsMessage({ type: 'TAB_CLOSED', tabId });
 });
 
 // Note: we intentionally do NOT clear logs on tab navigation so that
@@ -203,7 +338,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         scheduleFlush();
 
         // Forward to MCP server
-        wsSend({ type: 'LOG', tabId, log: logEntry });
+        enqueueWsMessage({ type: 'LOG', tabId, log: logEntry });
       });
     }
     sendResponse({ success: true });
@@ -217,13 +352,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_WS_STATUS') {
+    sendResponse(getWsStatus());
+    return;
+  }
+
   if (message.type === 'CLEAR_LOGS') {
     ready.then(() => {
       tabLogs.set(message.tabId, []);
       chrome.storage.session.set({ [`logs_${message.tabId}`]: [] }, () => {
         sendResponse({ success: true });
       });
-      wsSend({ type: 'LOGS_CLEARED', tabId: message.tabId });
+      enqueueWsMessage({ type: 'LOGS_CLEARED', tabId: message.tabId });
     });
     return true;
   }
