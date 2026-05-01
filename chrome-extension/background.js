@@ -3,8 +3,105 @@
 // survive service worker restarts.
 
 const tabLogs = new Map();
+const tabLogSizes = new Map();
 let dirtyTabs = new Set();
 let flushTimer = null;
+const MAX_LOG_ENTRIES = 1000;
+const MAX_STORED_LOG_BYTES = 5 * 1024 * 1024;
+const MAX_SINGLE_LOG_BYTES = 256 * 1024;
+const MAX_STACK_CHARS = 20000;
+const MAX_PREVIEW_CHARS = 120;
+
+// Measures stored payload size so session storage failures are prevented before Chrome drops writes.
+function getStoredSize(value) {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).length;
+  } catch {
+    return MAX_SINGLE_LOG_BYTES + 1;
+  }
+}
+
+// Tracks approximate per-tab storage size without re-stringifying every log on each append.
+function getTabLogSize(tabId) {
+  if (!tabLogSizes.has(tabId)) {
+    tabLogSizes.set(tabId, getStoredSize(tabLogs.get(tabId) || []));
+  }
+  return tabLogSizes.get(tabId);
+}
+
+// Keeps huge objects useful for copying while making each captured entry safe to persist and send.
+function shrinkValue(value, maxChars) {
+  if (typeof value === 'string') {
+    return value.length > maxChars ? `${value.slice(0, maxChars)}\n[truncated]` : value;
+  }
+
+  try {
+    const text = JSON.stringify(value);
+    if (text.length <= maxChars) return value;
+    return `${text.slice(0, maxChars)}\n[truncated]`;
+  } catch {
+    const text = String(value);
+    return text.length > maxChars ? `${text.slice(0, maxChars)}\n[truncated]` : text;
+  }
+}
+
+// Precomputes the collapsed row text so opening the popup does not serialize every log again.
+function createPreview(args) {
+  const preview = args.map((arg) => {
+    if (typeof arg === 'string') return arg;
+
+    try {
+      return JSON.stringify(arg);
+    } catch {
+      return String(arg);
+    }
+  }).join(' ');
+
+  return preview.length > MAX_PREVIEW_CHARS ? `${preview.slice(0, MAX_PREVIEW_CHARS)}...` : preview;
+}
+
+// Normalizes incoming logs once so all later popup and storage work has a bounded payload.
+function createStoredLog(message) {
+  const log = {
+    level: message.level,
+    timestamp: message.timestamp,
+    args: Array.isArray(message.args) ? message.args : [],
+    stack: typeof message.stack === 'string' ? shrinkValue(message.stack, MAX_STACK_CHARS) : message.stack,
+    filterCategory: message.filterCategory || null
+  };
+  log.preview = createPreview(log.args);
+
+  let size = getStoredSize(log);
+  if (size <= MAX_SINGLE_LOG_BYTES) return log;
+
+  const args = log.args.map((arg) => shrinkValue(arg, Math.max(2000, Math.floor(MAX_SINGLE_LOG_BYTES / Math.max(log.args.length, 1)))));
+  const compactLog = { ...log, args };
+  compactLog.preview = createPreview(compactLog.args);
+  size = getStoredSize(compactLog);
+  if (size <= MAX_SINGLE_LOG_BYTES) return compactLog;
+
+  const truncatedArg = `${JSON.stringify(args).slice(0, MAX_SINGLE_LOG_BYTES)}\n[truncated]`;
+  return {
+    ...compactLog,
+    args: [truncatedArg],
+    preview: createPreview([truncatedArg])
+  };
+}
+
+// Trims oldest entries until the tab payload fits Chrome's session storage budget.
+function trimTabLogs(tabId) {
+  const logs = tabLogs.get(tabId) || [];
+  let size = getTabLogSize(tabId);
+
+  while (logs.length > MAX_LOG_ENTRIES) {
+    size -= getStoredSize(logs.shift()) + 1;
+  }
+  while (logs.length > 0 && size > MAX_STORED_LOG_BYTES) {
+    size -= getStoredSize(logs.shift()) + 1;
+  }
+
+  tabLogSizes.set(tabId, Math.max(2, size));
+}
 
 // Track current URL per tab for MCP session management
 const tabUrls = new Map();
@@ -16,6 +113,7 @@ const ready = new Promise((resolve) => {
       if (key.startsWith('logs_')) {
         const tabId = parseInt(key.slice(5));
         tabLogs.set(tabId, value);
+        tabLogSizes.set(tabId, getStoredSize(value));
       }
     }
     resolve();
@@ -26,13 +124,32 @@ const ready = new Promise((resolve) => {
 function scheduleFlush() {
   if (flushTimer) return;
   flushTimer = setTimeout(() => {
+    const flushedTabs = Array.from(dirtyTabs);
     const updates = {};
-    for (const tabId of dirtyTabs) {
+    for (const tabId of flushedTabs) {
+      trimTabLogs(tabId);
       updates[`logs_${tabId}`] = tabLogs.get(tabId) || [];
     }
     dirtyTabs.clear();
     flushTimer = null;
-    chrome.storage.session.set(updates);
+    chrome.storage.session.set(updates, () => {
+      if (!chrome.runtime.lastError) return;
+
+      for (const tabId of flushedTabs) {
+        const logs = tabLogs.get(tabId) || [];
+        let size = getTabLogSize(tabId);
+        while (logs.length > 0 && size > MAX_STORED_LOG_BYTES / 2) {
+          size -= getStoredSize(logs.shift()) + 1;
+        }
+        tabLogSizes.set(tabId, Math.max(2, size));
+      }
+
+      const retryUpdates = {};
+      for (const tabId of flushedTabs) {
+        retryUpdates[`logs_${tabId}`] = tabLogs.get(tabId) || [];
+      }
+      chrome.storage.session.set(retryUpdates);
+    });
   }, 500);
 }
 
@@ -40,6 +157,7 @@ function scheduleFlush() {
 function initTab(tabId) {
   if (!tabLogs.has(tabId)) {
     tabLogs.set(tabId, []);
+    tabLogSizes.set(tabId, getStoredSize([]));
   }
 }
 
@@ -55,7 +173,7 @@ function wsSend(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
   } else {
-    // Queue messages while connecting — they'll flush on open
+    // Queue messages while connecting, then flush them on open.
     wsQueue.push(msg);
   }
 }
@@ -130,12 +248,14 @@ function handleServerMessage(msg) {
   if (msg.type === 'CLEAR_LOGS' && msg.tabId) {
     ready.then(() => {
       tabLogs.set(msg.tabId, []);
+      tabLogSizes.set(msg.tabId, getStoredSize([]));
       chrome.storage.session.set({ [`logs_${msg.tabId}`]: [] });
     });
   } else if (msg.type === 'CLEAR_ALL_LOGS') {
     ready.then(() => {
       for (const tabId of tabLogs.keys()) {
         tabLogs.set(tabId, []);
+        tabLogSizes.set(tabId, getStoredSize([]));
       }
       const updates = {};
       for (const tabId of tabLogs.keys()) {
@@ -171,6 +291,7 @@ chrome.webNavigation.onCommitted.addListener((details) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabLogs.delete(tabId);
   tabUrls.delete(tabId);
+  tabLogSizes.delete(tabId);
   chrome.storage.session.remove(`logs_${tabId}`);
   wsSend({ type: 'TAB_CLOSED', tabId });
 });
@@ -187,18 +308,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ready.then(() => {
         initTab(tabId);
         const logs = tabLogs.get(tabId);
-        const logEntry = {
-          level: message.level,
-          timestamp: message.timestamp,
-          args: message.args,
-          stack: message.stack,
-          filterCategory: message.filterCategory || null
-        };
+        const logEntry = createStoredLog(message);
         logs.push(logEntry);
-        // Keep only last 1000 logs per tab
-        if (logs.length > 1000) {
-          logs.shift();
-        }
+        tabLogSizes.set(tabId, getTabLogSize(tabId) + getStoredSize(logEntry) + 1);
+        trimTabLogs(tabId);
         dirtyTabs.add(tabId);
         scheduleFlush();
 
@@ -220,6 +333,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CLEAR_LOGS') {
     ready.then(() => {
       tabLogs.set(message.tabId, []);
+      tabLogSizes.set(message.tabId, getStoredSize([]));
       chrome.storage.session.set({ [`logs_${message.tabId}`]: [] }, () => {
         sendResponse({ success: true });
       });
