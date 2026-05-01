@@ -3,6 +3,7 @@
 let currentLogs = [];
 let currentFormat = 'pretty';
 let currentSearch = '';
+let currentLogSignature = '';
 
 // Get current tab ID
 async function getCurrentTabId() {
@@ -13,10 +14,14 @@ async function getCurrentTabId() {
 // Fetch logs from background script
 async function fetchLogs() {
   const tabId = await getCurrentTabId();
-  if (!tabId) return [];
+  if (!tabId) return null;
 
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_LOGS', tabId }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
       resolve(response?.logs || []);
     });
   });
@@ -62,15 +67,21 @@ function formatLogArgs(args, format = 'pretty') {
 // Get preview text (first line, truncated)
 function getPreview(args) {
   const text = args.map(arg => {
-    if (typeof arg === 'string') return arg;
-    try {
-      return JSON.stringify(arg);
-    } catch {
-      return String(arg);
+    if (typeof arg === 'string') return arg.length > 120 ? arg.slice(0, 120) : arg;
+    if (Array.isArray(arg)) return `[Array(${arg.length})]`;
+    if (arg && typeof arg === 'object') {
+      const keys = Object.keys(arg).slice(0, 5);
+      return `{${keys.join(', ')}${Object.keys(arg).length > keys.length ? ', ...' : ''}}`;
     }
+    return String(arg);
   }).join(' ');
 
   return text.length > 60 ? text.substring(0, 60) + '...' : text;
+}
+
+// Uses capture-time previews when available so collapsed rows render without heavy serialization.
+function getLogPreview(log) {
+  return typeof log.preview === 'string' ? log.preview : getPreview(log.args);
 }
 
 // Format timestamp
@@ -95,6 +106,21 @@ function highlightJSON(json) {
     .replace(/: (null)/g, ': <span class="json-null">$1</span>');
 }
 
+// Tracks append-only log changes without repeatedly stringifying the full captured payload.
+function getLogSignature(logs) {
+  const last = logs[logs.length - 1];
+  if (!last) return '0';
+  return `${logs.length}:${last.timestamp}:${last.level}:${getLogPreview(last)}`;
+}
+
+// Builds the expanded content only when a user opens a row, keeping large captures responsive.
+function renderLogBodyContent(log) {
+  const formattedContent = formatLogArgs(log.args, currentFormat);
+  const content = currentFormat !== 'text' ? highlightJSON(escapeHtml(formattedContent)) : escapeHtml(formattedContent);
+  const stack = log.stack && log.level === 'error' ? `<div class="log-stack">${escapeHtml(log.stack)}</div>` : '';
+  return `${content}${stack}`;
+}
+
 // Render logs to the container
 function renderLogs() {
   const container = document.getElementById('logContainer');
@@ -107,8 +133,6 @@ function renderLogs() {
   }
 
   container.innerHTML = visibleLogs.map((log, index) => {
-    const formattedContent = formatLogArgs(log.args, currentFormat);
-    const highlighted = currentFormat !== 'text' ? highlightJSON(formattedContent) : escapeHtml(formattedContent);
     const categoryBadge = log.filterCategory
       ? `<span class="log-category ${log.filterCategory}">${log.filterCategory}</span>`
       : '';
@@ -118,14 +142,11 @@ function renderLogs() {
         <div class="log-header" onclick="toggleLog(${index})">
           <span class="log-level ${log.level}">${log.level}</span>
           ${categoryBadge}
-          <span class="log-preview">${escapeHtml(getPreview(log.args))}</span>
+          <span class="log-preview">${escapeHtml(getLogPreview(log))}</span>
           <span class="log-timestamp">${formatTimestamp(log.timestamp)}</span>
           <button class="copy-single" onclick="copySingleLog(event, ${index})" title="Copy this log">Copy</button>
         </div>
-        <div class="log-body collapsed" id="log-body-${index}">
-          ${highlighted}
-          ${log.stack && log.level === 'error' ? `<div class="log-stack">${escapeHtml(log.stack)}</div>` : ''}
-        </div>
+        <div class="log-body collapsed" id="log-body-${index}" data-rendered-format=""></div>
       </div>
     `;
   }).join('');
@@ -182,7 +203,7 @@ function matchesSearch(log, query) {
   // Search across level, timestamp, and all args
   if (log.level.toLowerCase().includes(lower)) return true;
   for (const arg of log.args) {
-    const text = typeof arg === 'string' ? arg : JSON.stringify(arg);
+    const text = typeof arg === 'string' ? arg : JSON.stringify(arg) ?? String(arg);
     if (text.toLowerCase().includes(lower)) return true;
   }
   return false;
@@ -204,7 +225,16 @@ function getVisibleLogs() {
 window.toggleLog = function(index) {
   const body = document.getElementById(`log-body-${index}`);
   if (body) {
-    body.classList.toggle('collapsed');
+    if (body.classList.contains('collapsed')) {
+      const log = getVisibleLogs()[index];
+      if (log && body.dataset.renderedFormat !== currentFormat) {
+        body.innerHTML = renderLogBodyContent(log);
+        body.dataset.renderedFormat = currentFormat;
+      }
+      body.classList.remove('collapsed');
+    } else {
+      body.classList.add('collapsed');
+    }
   }
 };
 
@@ -276,10 +306,13 @@ function showCopyStatus(message) {
 // Refresh and render logs (only if changed)
 async function refreshLogs() {
   const newLogs = await fetchLogs();
+  if (!newLogs) return;
+  const nextSignature = getLogSignature(newLogs);
 
   // Only re-render if logs have changed
-  if (JSON.stringify(newLogs) !== JSON.stringify(currentLogs)) {
+  if (nextSignature !== currentLogSignature) {
     currentLogs = newLogs;
+    currentLogSignature = nextSignature;
     renderLogs();
   }
 }
@@ -291,6 +324,7 @@ async function init() {
   document.getElementById('clearBtn').addEventListener('click', async () => {
     await clearLogs();
     currentLogs = [];
+    currentLogSignature = getLogSignature(currentLogs);
     renderLogs();
     showCopyStatus('Cleared!');
   });
