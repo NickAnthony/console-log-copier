@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   CONSOLE_CAPTURE — Terminal Noir Edition
+   CONSOLE_CAPTURE - Terminal Noir Edition
    A refined developer tool with CRT-inspired aesthetics
    ═══════════════════════════════════════════════════════════════ */
 
@@ -246,6 +246,19 @@ button {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-visible);
+}
+
+.btn-ghost:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.btn-ghost.is-busy svg {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -786,6 +799,26 @@ footer {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.listener-status {
+  max-width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.listener-status[data-state="attached"] {
+  color: var(--phosphor);
+}
+
+.listener-status[data-state="stale"],
+.listener-status[data-state="repair-failed"],
+.listener-status[data-state="capture-error"] {
+  color: var(--warn-amber);
 }
 
 .copy-status {
