@@ -49,6 +49,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
 `);
 
+// Adds optional log metadata columns when an older local SQLite DB is already present.
+function ensureLogColumn(name, definition) {
+  const columns = db.prepare(`PRAGMA table_info(logs)`).all();
+  if (!columns.some(column => column.name === name)) {
+    db.exec(`ALTER TABLE logs ADD COLUMN ${name} ${definition}`);
+  }
+}
+
+ensureLogColumn('preview', 'TEXT');
+ensureLogColumn('source_url', 'TEXT');
+ensureLogColumn('page_url', 'TEXT');
+ensureLogColumn('frame_id', 'INTEGER');
+ensureLogColumn('document_id', 'TEXT');
+ensureLogColumn('attach_id', 'TEXT');
+
 // Prune old sessions on startup
 db.prepare(`
   DELETE FROM logs WHERE session_id IN (
@@ -67,9 +82,18 @@ const stmts = {
   insertSession: db.prepare(`
     INSERT INTO sessions (tab_id, url, title) VALUES (?, ?, ?)
   `),
+  updateSessionUrl: db.prepare(`
+    UPDATE sessions SET url = ?, title = COALESCE(title, ?) WHERE id = ?
+  `),
+  getSessionById: db.prepare(`
+    SELECT id, tab_id, url FROM sessions WHERE id = ?
+  `),
   insertLog: db.prepare(`
-    INSERT INTO logs (session_id, level, timestamp, args, stack, filter_category)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO logs (
+      session_id, level, timestamp, args, stack, filter_category,
+      preview, source_url, page_url, frame_id, document_id, attach_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getActiveSessionForTab: db.prepare(`
     SELECT id FROM sessions WHERE tab_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1
@@ -85,7 +109,7 @@ const stmts = {
     ORDER BY id DESC LIMIT 1
   `),
   getLogsForSession: db.prepare(`
-    SELECT id, level, timestamp, args, stack, filter_category FROM logs
+    SELECT id, level, timestamp, args, stack, filter_category, preview, source_url, page_url, frame_id, document_id, attach_id FROM logs
     WHERE session_id = ? ORDER BY id ASC
   `),
   listActiveSessions: db.prepare(`
@@ -123,6 +147,53 @@ for (const row of db.prepare(`SELECT tab_id, id FROM sessions WHERE is_active = 
   tabSessionMap.set(row.tab_id, row.id);
 }
 
+// Resolves a log to a session, using log URL metadata to repair unknown stale sessions.
+function ensureSessionForLog(tabId, log) {
+  const knownUrl = log.pageUrl || log.sourceUrl || null;
+  let sessionId = tabSessionMap.get(tabId);
+  if (!sessionId) {
+    const result = stmts.insertSession.run(tabId, knownUrl || 'unknown', null);
+    sessionId = result.lastInsertRowid;
+    tabSessionMap.set(tabId, sessionId);
+    return sessionId;
+  }
+
+  const session = stmts.getSessionById.get(sessionId);
+  if (!session) {
+    tabSessionMap.delete(tabId);
+    return ensureSessionForLog(tabId, log);
+  }
+
+  if (knownUrl && session.url === 'unknown') {
+    stmts.updateSessionUrl.run(knownUrl, null, sessionId);
+  } else if (knownUrl && session.url !== knownUrl) {
+    stmts.endActiveSessionsForTab.run(tabId);
+    const result = stmts.insertSession.run(tabId, knownUrl, null);
+    sessionId = result.lastInsertRowid;
+    tabSessionMap.set(tabId, sessionId);
+  }
+
+  return sessionId;
+}
+
+// Persists one log with optional source metadata from newer extension versions.
+function insertLog(sessionId, log) {
+  stmts.insertLog.run(
+    sessionId,
+    log.level,
+    log.timestamp,
+    JSON.stringify(log.args),
+    log.stack || null,
+    log.filterCategory || null,
+    log.preview || null,
+    log.sourceUrl || null,
+    log.pageUrl || null,
+    Number.isInteger(log.frameId) ? log.frameId : null,
+    log.documentId || null,
+    log.attachId || null
+  );
+}
+
 // --- WebSocket Server ---
 
 const wsClients = new Set();
@@ -130,7 +201,7 @@ const wss = new WebSocketServer({ port: WS_PORT });
 
 wss.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    // Another MCP server instance owns the WebSocket — this instance
+    // Another MCP server instance owns the WebSocket, so this instance
     // still works for MCP tool queries against the shared SQLite DB.
     console.error(`WebSocket port ${WS_PORT} already in use, running in MCP-only mode`);
   } else {
@@ -177,21 +248,8 @@ function handleExtensionMessage(msg) {
 
     case 'LOG': {
       const { tabId, log } = msg;
-      let sessionId = tabSessionMap.get(tabId);
-      if (!sessionId) {
-        // No session yet for this tab — create one with unknown URL
-        const result = stmts.insertSession.run(tabId, 'unknown', null);
-        sessionId = result.lastInsertRowid;
-        tabSessionMap.set(tabId, sessionId);
-      }
-      stmts.insertLog.run(
-        sessionId,
-        log.level,
-        log.timestamp,
-        JSON.stringify(log.args),
-        log.stack || null,
-        log.filterCategory || null
-      );
+      const sessionId = ensureSessionForLog(tabId, log);
+      insertLog(sessionId, log);
       break;
     }
 
@@ -232,18 +290,11 @@ function handleExtensionMessage(msg) {
             // Insert all logs
             if (tabData.logs && tabData.logs.length > 0) {
               for (const log of tabData.logs) {
-                stmts.insertLog.run(
-                  newSessionId,
-                  log.level,
-                  log.timestamp,
-                  JSON.stringify(log.args),
-                  log.stack || null,
-                  log.filterCategory || null
-                );
+                insertLog(newSessionId, log);
               }
             }
           }
-          // If session already exists, skip — we already have these logs
+          // If session already exists, skip because we already have these logs.
         }
       });
       syncTransaction();
@@ -362,7 +413,7 @@ server.tool(
     }
 
     const lines = sessions.map(s =>
-      `- ${s.url}${s.title ? ` "${s.title}"` : ''} — ${s.log_count} logs (since ${s.started_at})`
+      `- ${s.url}${s.title ? ` "${s.title}"` : ''} - ${s.log_count} logs (since ${s.started_at})`
     );
     return { content: [{ type: 'text', text: `Active pages (${sessions.length}):\n${lines.join('\n')}` }] };
   }
@@ -382,7 +433,7 @@ server.tool(
     }
 
     const lines = sessions.map(s =>
-      `- Session #${s.id}: ${s.url}${s.title ? ` "${s.title}"` : ''} — ${s.log_count} logs, started ${s.started_at}${s.ended_at ? `, ended ${s.ended_at}` : ' (active)'}${s.is_active ? ' [ACTIVE]' : ''}`
+      `- Session #${s.id}: ${s.url}${s.title ? ` "${s.title}"` : ''} - ${s.log_count} logs, started ${s.started_at}${s.ended_at ? `, ended ${s.ended_at}` : ' (active)'}${s.is_active ? ' [ACTIVE]' : ''}`
     );
     return { content: [{ type: 'text', text: `Session history for "${url}" (${sessions.length}):\n${lines.join('\n')}` }] };
   }
@@ -421,7 +472,7 @@ server.tool(
       return line;
     }).join('\n');
 
-    return { content: [{ type: 'text', text: `Session #${session_id} — ${logs.length} logs:\n${formatted}` }] };
+    return { content: [{ type: 'text', text: `Session #${session_id} - ${logs.length} logs:\n${formatted}` }] };
   }
 );
 
