@@ -19,9 +19,10 @@ The extension requests the following permissions, used solely for its core funct
 | Permission | Purpose |
 |---|---|
 | `activeTab` | Access the current tab to capture console output |
-| `scripting` | Inject the console interceptor into the page |
 | `storage` | Store captured logs locally per tab |
 | `clipboardWrite` | Copy logs to the clipboard when requested by the user |
+| `scripting` | Reattach the console interceptor from the popup |
+| `<all_urls>` | Run the console interceptor on regular browser pages |
 
 ## Third-Party Services
 

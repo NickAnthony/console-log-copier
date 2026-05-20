@@ -14,10 +14,15 @@
     "chrome-extension",
     "debugging"
   ],
+  "author": "Nick Anthony",
   "license": "MIT",
+  "homepage": "https://github.com/NickAnthony/console-log-copier",
   "repository": {
     "type": "git",
     "url": "https://github.com/NickAnthony/console-log-copier"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "files": [
     "index.js"

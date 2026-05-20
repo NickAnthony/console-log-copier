@@ -4,8 +4,6 @@
 
 A Chrome extension that captures console logs with **full object serialization** - no more truncated `[Object]` in your copied logs. Filters out React/Node framework noise so you only get your actual console statements.
 
-Includes an **MCP server** so AI coding tools (Claude Code, Cursor, etc.) can query your browser's console logs programmatically.
-
 ## Features
 
 - **Deep Object Serialization** - Captures all nested fields, no truncation
@@ -19,7 +17,7 @@ Includes an **MCP server** so AI coding tools (Claude Code, Cursor, etc.) can qu
 - **Multiple Formats** - Pretty JSON, Compact JSON, or Plain Text
 - **Copy Individual or All** - Copy single entries or all logs at once
 - **Stack Traces for Errors** - Only shows stack traces for error-level logs
-- **MCP Server** - Query console logs from AI coding tools via the Model Context Protocol
+- **All-Site Capture** - Runs on regular browser pages, not just localhost
 
 ## Installation
 
@@ -38,65 +36,9 @@ Includes an **MCP server** so AI coding tools (Claude Code, Cursor, etc.) can qu
 
 5. Select the `chrome-extension` folder
 
-### MCP Server (optional)
-
-The MCP server lets AI tools like Claude Code and Cursor query your browser's console logs. The extension works fine without it.
-
-Add to your MCP config:
-
-**Claude Code** (`.mcp.json` in your project root):
-```json
-{
-  "mcpServers": {
-    "console-logs": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "console-log-mcp-server"]
-    }
-  }
-}
-```
-
-**Cursor** (`~/.cursor/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "console-logs": {
-      "command": "npx",
-      "args": ["-y", "console-log-mcp-server"]
-    }
-  }
-}
-```
-
-That's it — the Chrome extension auto-connects to the MCP server via WebSocket on `localhost:18462`. No additional setup needed.
-
-### MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `list_active_pages` | List all pages with active sessions (URL, title, log count) |
-| `get_console_logs` | Get logs from the most recent page load for a URL (supports partial match like `localhost:2001`) |
-| `get_console_errors` | Get only errors from the most recent page load for a URL |
-| `get_session_history` | List recent page load sessions for a URL |
-| `get_logs_by_session` | Get logs from a specific session ID |
-| `clear_logs` | Clear logs for a URL or all logs |
-
-### Typical AI workflow
-
-```
-1. list_active_pages        → sees localhost:2001 (47 logs), localhost:2002 (12 logs)
-2. get_console_logs("localhost:2001")  → gets all 47 logs from the latest page load
-3. get_console_errors("localhost:2001") → just the errors
-4. *reload page in browser*
-5. get_console_logs("localhost:2001")  → only logs from the new page load
-```
-
-Each page navigation/reload creates a new session, so you always get clean logs from one page load.
-
 ## Usage
 
-1. Navigate to any localhost page
+1. Navigate to any regular browser page
 2. Open the browser console and use `console.log()`, `console.error()`, etc.
 3. Click the extension icon in Chrome toolbar
 4. View captured logs with full object data
@@ -130,9 +72,9 @@ This extension requires:
 - **activeTab** - Access the current tab to inject the console interceptor
 - **storage** - Store captured logs per tab
 - **clipboardWrite** - Copy logs to clipboard
-- **webNavigation** - Detect page loads to create log sessions for the MCP server
+- **scripting** - Reattach the console interceptor from the popup
 
-The extension only activates on localhost pages and does not send any data externally. The MCP server runs locally and stores logs in `~/.console-log-mcp/`.
+The extension activates on regular browser pages and does not send any data externally. Chrome blocks content scripts from internal pages like `chrome://`.
 
 ## Contributing
 
