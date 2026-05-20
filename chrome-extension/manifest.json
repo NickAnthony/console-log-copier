@@ -5,14 +5,12 @@
   "description": "Copy console logs with full object data to clipboard, filtering out React/Node noise",
   "permissions": [
     "activeTab",
-    "scripting",
     "storage",
     "clipboardWrite",
-    "webNavigation"
+    "scripting"
   ],
   "host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -32,14 +30,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "matches": ["<all_urls>"],
       "js": ["inject.js"],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
     },
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true

@@ -1,19 +1,40 @@
-// Injected script that intercepts console methods in the page context.
+// Injected script that intercepts console methods
+// This runs in the page context to capture all console output
 
 (function() {
   'use strict';
 
   const STATE_KEY = '__CONSOLE_LOG_COPIER_STATE__';
-  const EVENT_NAME = '__CONSOLE_LOG_COPIER__';
-  const STATUS_EVENT_NAME = '__CONSOLE_LOG_COPIER_STATUS__';
-  const CONSOLE_LEVELS = ['log', 'warn', 'error', 'info', 'debug', 'table', 'dir', 'dirxml'];
 
-  const previousState = window[STATE_KEY];
-  if (previousState && typeof previousState.restore === 'function') {
-    previousState.restore('reattach');
+  function getSourceMetadata(attachId) {
+    return {
+      url: window.location.href,
+      origin: window.location.origin,
+      title: document.title || null,
+      frame: window.top === window ? 'main' : 'frame',
+      attachId
+    };
   }
 
-  const attachId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Creates a durable attach marker even on pages without randomUUID support.
+  function createAttachId() {
+    return crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function dispatchStatus(status) {
+    try {
+      window.dispatchEvent(new CustomEvent('__CONSOLE_LOG_COPIER_STATUS__', {
+        detail: {
+          ...status,
+          source: getSourceMetadata(status.attachId)
+        }
+      }));
+    } catch (e) {
+      // Keep the page isolated from extension status failures.
+    }
+  }
 
   // Categorized patterns for framework noise detection
   const CATEGORIZED_FILTER_PATTERNS = {
@@ -48,6 +69,7 @@
     ],
   };
 
+  // Categorized stack trace patterns for framework internals
   const CATEGORIZED_STACK_PATTERNS = {
     react: [/node_modules\/react/, /node_modules\/react-dom/],
     framework: [
@@ -57,47 +79,33 @@
     bundler: [/node_modules\/webpack/],
   };
 
+  // Hoist entries for performance (these run on every console call)
   const FILTER_ENTRIES = Object.entries(CATEGORIZED_FILTER_PATTERNS);
   const STACK_ENTRIES = Object.entries(CATEGORIZED_STACK_PATTERNS);
 
-  const originalConsole = {};
-  for (const level of CONSOLE_LEVELS) {
-    originalConsole[level] = previousState?.originalConsole?.[level] || console[level].bind(console);
-  }
-  const originalFetch = previousState?.originalFetch || window.fetch;
-  const originalXHROpen = previousState?.originalXHROpen || window.XMLHttpRequest?.prototype.open;
-  const originalXHRSend = previousState?.originalXHRSend || window.XMLHttpRequest?.prototype.send;
-  const OriginalEventSource = previousState?.OriginalEventSource || window.EventSource;
-
-  // Publishes listener health so the popup can show status and trigger repair.
-  function dispatchStatus(status, reason = null) {
-    window.dispatchEvent(new CustomEvent(STATUS_EVENT_NAME, {
-      detail: {
-        status,
-        reason,
-        timestamp: new Date().toISOString(),
-        sourceUrl: location.href,
-        pageUrl: location.href,
-        attachId
-      }
-    }));
-  }
-
-  // Strip ANSI escape codes and console format markers from captured strings.
+  // Strip ANSI escape codes from strings
+  // Matches: ESC[...m, \x1b[...m, and bare [...m sequences
   function stripAnsi(str) {
     if (typeof str !== 'string') return str;
+    // Match ANSI escape sequences: ESC[ or \x1b[ followed by params and ending with letter
+    // Also match bare bracket sequences like [0m, [2;38;2;124;124;124m
     return str
-      .replace(/\x1b\[[0-9;]*m/g, '')
-      .replace(/\u001b\[[0-9;]*m/g, '')
-      .replace(/\033\[[0-9;]*m/g, '')
-      .replace(/\[\d+(?:;\d+)*m/g, '')
-      .replace(/%[sdifoOc]/g, '')
+      .replace(/\x1b\[[0-9;]*m/g, '')  // Standard ANSI escapes
+      .replace(/\u001b\[[0-9;]*m/g, '') // Unicode escape
+      .replace(/\033\[[0-9;]*m/g, '')   // Octal escape
+      .replace(/\[\d+(?:;\d+)*m/g, '')  // Bare bracket sequences like [0m or [2;38;2;124;124;124m
+      .replace(/%[sdifoOc]/g, '')       // Console format specifiers like %s, %d, etc.
       .trim();
   }
 
-  // Deep-serializes console arguments while preserving useful object shape for copy output.
+  // Deep serialize an object with circular reference handling
   function deepSerialize(obj, seen = new WeakSet(), depth = 0, maxDepth = 10) {
-    if (depth > maxDepth) return '[Max Depth Reached]';
+    // Prevent infinite recursion
+    if (depth > maxDepth) {
+      return '[Max Depth Reached]';
+    }
+
+    // Handle primitives
     if (obj === null) return null;
     if (obj === undefined) return undefined;
     if (typeof obj === 'string') return stripAnsi(obj);
@@ -109,9 +117,17 @@
     if (typeof obj === 'boolean') return obj;
     if (typeof obj === 'bigint') return obj.toString() + 'n';
     if (typeof obj === 'symbol') return obj.toString();
-    if (typeof obj === 'function') return `[Function: ${obj.name || 'anonymous'}]`;
-    if (obj instanceof Date) return obj.toISOString();
-    if (obj instanceof RegExp) return obj.toString();
+    if (typeof obj === 'function') {
+      return `[Function: ${obj.name || 'anonymous'}]`;
+    }
+
+    // Handle special objects
+    if (obj instanceof Date) {
+      return obj.toISOString();
+    }
+    if (obj instanceof RegExp) {
+      return obj.toString();
+    }
     if (obj instanceof Error) {
       return {
         __type__: 'Error',
@@ -125,9 +141,7 @@
       seen.add(obj);
       const entries = {};
       for (const [key, value] of obj) {
-        const keyStr = typeof key === 'object'
-          ? JSON.stringify(deepSerialize(key, seen, depth + 1, maxDepth))
-          : String(key);
+        const keyStr = typeof key === 'object' ? JSON.stringify(deepSerialize(key, seen, depth + 1, maxDepth)) : String(key);
         entries[keyStr] = deepSerialize(value, seen, depth + 1, maxDepth);
       }
       return { __type__: 'Map', entries };
@@ -140,8 +154,12 @@
         values: Array.from(obj).map(v => deepSerialize(v, seen, depth + 1, maxDepth))
       };
     }
-    if (obj instanceof WeakMap) return '[WeakMap]';
-    if (obj instanceof WeakSet) return '[WeakSet]';
+    if (obj instanceof WeakMap) {
+      return '[WeakMap]';
+    }
+    if (obj instanceof WeakSet) {
+      return '[WeakSet]';
+    }
     if (ArrayBuffer.isView(obj)) {
       return {
         __type__: obj.constructor.name,
@@ -150,195 +168,275 @@
       };
     }
     if (obj instanceof ArrayBuffer) {
-      return { __type__: 'ArrayBuffer', byteLength: obj.byteLength };
+      return {
+        __type__: 'ArrayBuffer',
+        byteLength: obj.byteLength
+      };
     }
-    if (typeof obj === 'object') {
+    if (typeof obj === 'object' && obj.constructor === Object.prototype.constructor === false && obj.constructor?.name) {
+      // Handle DOM elements
       if (obj instanceof Element) {
         return `[${obj.tagName}${obj.id ? '#' + obj.id : ''}${obj.className ? '.' + obj.className.split(' ').join('.') : ''}]`;
       }
-      if (obj instanceof Node) return `[${obj.nodeName}]`;
-      if (typeof Window !== 'undefined' && obj instanceof Window) return '[Window]';
-      if (typeof Document !== 'undefined' && obj instanceof Document) return '[Document]';
-      if (seen.has(obj)) return '[Circular]';
+      if (obj instanceof Node) {
+        return `[${obj.nodeName}]`;
+      }
+      if (typeof Window !== 'undefined' && obj instanceof Window) {
+        return '[Window]';
+      }
+      if (typeof Document !== 'undefined' && obj instanceof Document) {
+        return '[Document]';
+      }
+    }
+
+    // Handle circular references
+    if (typeof obj === 'object') {
+      if (seen.has(obj)) {
+        return '[Circular]';
+      }
       seen.add(obj);
     }
+
+    // Handle arrays
     if (Array.isArray(obj)) {
       return obj.map(item => deepSerialize(item, seen, depth + 1, maxDepth));
     }
+
+    // Handle plain objects
     if (typeof obj === 'object') {
       const result = {};
-      for (const key of Object.keys(obj)) {
+      const keys = Object.keys(obj);
+
+      // Also get symbol keys
+      const symbolKeys = Object.getOwnPropertySymbols(obj);
+
+      for (const key of keys) {
         try {
           result[key] = deepSerialize(obj[key], seen, depth + 1, maxDepth);
         } catch (e) {
           result[key] = `[Error accessing property: ${e.message}]`;
         }
       }
-      for (const sym of Object.getOwnPropertySymbols(obj)) {
+
+      for (const sym of symbolKeys) {
         try {
           result[sym.toString()] = deepSerialize(obj[sym], seen, depth + 1, maxDepth);
         } catch (e) {
           result[sym.toString()] = `[Error accessing property: ${e.message}]`;
         }
       }
+
+      // Add constructor name if it's a custom class
       if (obj.constructor && obj.constructor.name && obj.constructor.name !== 'Object') {
         result.__className__ = obj.constructor.name;
       }
+
       return result;
     }
+
     return String(obj);
   }
 
-  // Classifies likely framework noise without dropping the log entirely.
+  // Determine the noise category for a log, or null if it's a normal user log
   function getFilterCategory(args, stack) {
     if (!args || args.length === 0) return 'devtools';
+
     const firstArg = args[0];
+
+    // Check if first argument matches categorized filter patterns
     if (typeof firstArg === 'string') {
       for (const [category, patterns] of FILTER_ENTRIES) {
         for (const pattern of patterns) {
-          if (pattern.test(firstArg)) return category;
+          if (pattern.test(firstArg)) {
+            return category;
+          }
         }
       }
     }
+
+    // Check stack trace for framework internals
     if (stack) {
       for (const [category, patterns] of STACK_ENTRIES) {
         for (const pattern of patterns) {
-          if (!pattern.test(stack)) continue;
-          const stackLines = stack.split('\n');
-          const firstStackLine = stackLines.find(line =>
-            line.includes('at ') && !line.includes('deepSerialize') && !line.includes('interceptConsole')
-          );
-          if (firstStackLine && pattern.test(firstStackLine)) return category;
+          if (pattern.test(stack)) {
+            const stackLines = stack.split('\n');
+            const firstStackLine = stackLines.find(line =>
+              line.includes('at ') && !line.includes('deepSerialize') && !line.includes('interceptConsole')
+            );
+            if (firstStackLine && pattern.test(firstStackLine)) {
+              return category;
+            }
+          }
         }
       }
     }
+
     return null;
   }
 
-  // Returns a caller stack with the capture implementation frames removed.
+  // Get clean stack trace
   function getCleanStack() {
     const stack = new Error().stack;
     if (!stack) return null;
+
+    // Remove the first few lines that are from this script
     const lines = stack.split('\n');
-    const cleanLines = lines.filter(line =>
-      !line.includes('inject.js') &&
-      !line.includes('deepSerialize') &&
-      !line.includes('interceptConsole')
-    );
-    return cleanLines.slice(1).join('\n');
+    const cleanLines = lines.filter(line => {
+      return !line.includes('inject.js') &&
+             !line.includes('deepSerialize') &&
+             !line.includes('interceptConsole');
+    });
+
+    return cleanLines.slice(1).join('\n'); // Remove "Error" line
   }
 
-  // Wraps one console method while preserving the page's original behavior first.
+  const previousState = window[STATE_KEY];
+  if (previousState?.restore) {
+    previousState.restore();
+  }
+
+  const attachId = createAttachId();
+  const attachedAt = new Date().toISOString();
+  const originalConsole = previousState?.originalConsole || {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+    info: console.info.bind(console),
+    debug: console.debug.bind(console),
+    table: console.table.bind(console),
+    dir: console.dir.bind(console),
+    dirxml: console.dirxml.bind(console),
+  };
+  const originalFetch = previousState?.originalFetch || window.fetch;
+  const originalXHROpen = previousState?.originalXHROpen || XMLHttpRequest.prototype.open;
+  const originalXHRSend = previousState?.originalXHRSend || XMLHttpRequest.prototype.send;
+  const OriginalEventSource = previousState?.OriginalEventSource || window.EventSource;
+
+  // Intercept console methods
   function interceptConsole(level) {
     return function(...args) {
+      // Always call the original
       originalConsole[level](...args);
+
       try {
         const stack = getCleanStack();
         const filterCategory = getFilterCategory(args, stack);
+
+        // Deep serialize all arguments
         const serializedArgs = args.map(arg => deepSerialize(arg));
-        window.dispatchEvent(new CustomEvent(EVENT_NAME, {
+
+        // Dispatch custom event to content script
+        window.dispatchEvent(new CustomEvent('__CONSOLE_LOG_COPIER__', {
           detail: {
             level,
             timestamp: new Date().toISOString(),
             args: serializedArgs,
-            stack,
-            filterCategory,
-            sourceUrl: location.href,
-            pageUrl: location.href,
-            attachId
+            stack: stack,
+            filterCategory: filterCategory,
+            source: getSourceMetadata(attachId)
           }
         }));
-      } catch {
-        dispatchStatus('capture-error', 'console serialization failed');
+      } catch (e) {
+        // Silently fail - don't break the page's console
       }
     };
   }
 
-  for (const level of CONSOLE_LEVELS) {
-    console[level] = interceptConsole(level);
-  }
+  // Override console methods
+  console.log = interceptConsole('log');
+  console.warn = interceptConsole('warn');
+  console.error = interceptConsole('error');
+  console.info = interceptConsole('info');
+  console.debug = interceptConsole('debug');
+  console.table = interceptConsole('table');
+  console.dir = interceptConsole('dir');
+  console.dirxml = interceptConsole('dirxml');
 
-  // Emits failed network responses as log entries that travel through the same durable path.
+  // Dispatch a network error log
   function dispatchNetworkError(details) {
     try {
-      window.dispatchEvent(new CustomEvent(EVENT_NAME, {
+      window.dispatchEvent(new CustomEvent('__CONSOLE_LOG_COPIER__', {
         detail: {
           level: 'network',
           timestamp: new Date().toISOString(),
           args: [deepSerialize(details)],
-          stack: null,
-          sourceUrl: location.href,
-          pageUrl: location.href,
-          attachId
+          stack: null
         }
       }));
-    } catch {
-      dispatchStatus('capture-error', 'network serialization failed');
+    } catch (e) {
+      // Silently fail
     }
   }
 
+  // Intercept fetch for network errors
   window.fetch = async function(...args) {
     const url = args[0] instanceof Request ? args[0].url : String(args[0]);
     const method = args[1]?.method || (args[0] instanceof Request ? args[0].method : 'GET');
+
     try {
       const response = await originalFetch.apply(this, args);
+
+      // Capture failed HTTP responses (4xx, 5xx)
       if (!response.ok) {
         dispatchNetworkError({
           type: 'fetch',
           method: method.toUpperCase(),
-          url,
+          url: url,
           status: response.status,
           statusText: response.statusText
         });
       }
+
       return response;
     } catch (error) {
+      // Capture network failures (CORS, connection refused, etc.)
       dispatchNetworkError({
         type: 'fetch',
         method: method.toUpperCase(),
-        url,
+        url: url,
         error: error.message
       });
       throw error;
     }
   };
 
-  if (window.XMLHttpRequest && originalXHROpen && originalXHRSend) {
-    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-      this.__clc_method = method;
-      this.__clc_url = url;
-      return originalXHROpen.call(this, method, url, ...rest);
-    };
+  // Intercept XMLHttpRequest for network errors
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    this.__clc_method = method;
+    this.__clc_url = url;
+    return originalXHROpen.call(this, method, url, ...rest);
+  };
 
-    XMLHttpRequest.prototype.send = function(...args) {
-      this.addEventListener('loadend', function() {
-        if (this.status >= 400 || this.status === 0) {
-          dispatchNetworkError({
-            type: 'xhr',
-            method: (this.__clc_method || 'GET').toUpperCase(),
-            url: this.__clc_url,
-            status: this.status,
-            statusText: this.statusText || (this.status === 0 ? 'Network Error' : '')
-          });
-        }
-      });
-
-      this.addEventListener('error', () => {
+  XMLHttpRequest.prototype.send = function(...args) {
+    this.addEventListener('loadend', function() {
+      if (this.status >= 400 || this.status === 0) {
         dispatchNetworkError({
           type: 'xhr',
           method: (this.__clc_method || 'GET').toUpperCase(),
           url: this.__clc_url,
-          error: 'Network request failed'
+          status: this.status,
+          statusText: this.statusText || (this.status === 0 ? 'Network Error' : '')
         });
+      }
+    });
+
+    this.addEventListener('error', () => {
+      dispatchNetworkError({
+        type: 'xhr',
+        method: (this.__clc_method || 'GET').toUpperCase(),
+        url: this.__clc_url,
+        error: 'Network request failed'
       });
+    });
 
-      return originalXHRSend.apply(this, args);
-    };
-  }
+    return originalXHRSend.apply(this, args);
+  };
 
+  // Intercept EventSource for network errors (SSE connections)
   if (OriginalEventSource) {
     window.EventSource = function(url, options) {
       const es = new OriginalEventSource(url, options);
+
       es.addEventListener('error', () => {
         dispatchNetworkError({
           type: 'eventsource',
@@ -347,6 +445,7 @@
           error: 'EventSource connection failed'
         });
       });
+
       return es;
     };
     window.EventSource.prototype = OriginalEventSource.prototype;
@@ -355,37 +454,34 @@
     Object.defineProperty(window.EventSource, 'CLOSED', { value: 2 });
   }
 
-  const heartbeatTimer = setInterval(() => dispatchStatus('attached'), 5000);
-
+  // Restores page APIs before reattaching so repeated injections do not stack wrappers.
   window[STATE_KEY] = {
     attachId,
+    attachedAt,
     originalConsole,
     originalFetch,
     originalXHROpen,
     originalXHRSend,
     OriginalEventSource,
-    // Restores page globals before a clean reinstall, preventing nested wrappers.
-    restore(reason = 'restore') {
-      clearInterval(heartbeatTimer);
-      for (const level of CONSOLE_LEVELS) {
-        if (originalConsole[level]) console[level] = originalConsole[level];
+    restore() {
+      for (const [level, original] of Object.entries(originalConsole)) {
+        console[level] = original;
       }
-      if (originalFetch) window.fetch = originalFetch;
-      if (window.XMLHttpRequest && originalXHROpen) XMLHttpRequest.prototype.open = originalXHROpen;
-      if (window.XMLHttpRequest && originalXHRSend) XMLHttpRequest.prototype.send = originalXHRSend;
-      if (OriginalEventSource) window.EventSource = OriginalEventSource;
-      window.dispatchEvent(new CustomEvent(STATUS_EVENT_NAME, {
-        detail: {
-          status: 'detached',
-          reason,
-          timestamp: new Date().toISOString(),
-          sourceUrl: location.href,
-          pageUrl: location.href,
-          attachId
-        }
-      }));
+      window.fetch = originalFetch;
+      XMLHttpRequest.prototype.open = originalXHROpen;
+      XMLHttpRequest.prototype.send = originalXHRSend;
+      if (OriginalEventSource) {
+        window.EventSource = OriginalEventSource;
+      }
     }
   };
 
-  dispatchStatus('attached', previousState ? 'reattached' : 'installed');
+  dispatchStatus({
+    attached: true,
+    attachId,
+    attachedAt,
+    reattached: Boolean(previousState)
+  });
+
+  window.__CONSOLE_LOG_COPIER_INITIALIZED__ = true;
 })();

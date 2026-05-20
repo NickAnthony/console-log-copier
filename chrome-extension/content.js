@@ -1,59 +1,47 @@
-// Content script bridge between the page-world console hook and the extension worker.
+// Content script - bridges page-world console events into the extension worker.
 
 (function() {
-  'use strict';
+  const STATE_KEY = '__CONSOLE_LOG_COPIER_CONTENT_STATE__';
+  const previousState = window[STATE_KEY];
 
-  const LISTENER_KEY = '__CONSOLE_LOG_COPIER_BRIDGE_LISTENER__';
-
-  if (globalThis[LISTENER_KEY]) {
-    window.removeEventListener('__CONSOLE_LOG_COPIER__', globalThis[LISTENER_KEY]);
+  if (previousState?.logHandler) {
+    window.removeEventListener('__CONSOLE_LOG_COPIER__', previousState.logHandler);
+  }
+  if (previousState?.statusHandler) {
+    window.removeEventListener('__CONSOLE_LOG_COPIER_STATUS__', previousState.statusHandler);
   }
 
-  // Replaces stale bridge listeners so reinjection can repair invalidated extension contexts.
-  function forwardConsoleCapture(event) {
-    const data = event.detail || {};
-    chrome.runtime.sendMessage({
+  function sendRuntimeMessage(message) {
+    chrome.runtime.sendMessage(message, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
+  const logHandler = (event) => {
+    const data = event.detail;
+    sendRuntimeMessage({
       type: 'CONSOLE_LOG',
       level: data.level,
       timestamp: data.timestamp,
       args: data.args,
       stack: data.stack,
       filterCategory: data.filterCategory || null,
-      sourceUrl: data.sourceUrl || location.href,
-      pageUrl: data.pageUrl || location.href,
-      frameId: data.frameId ?? null,
-      documentId: data.documentId || null,
-      attachId: data.attachId || null
-    }, () => {
-      // If the extension was reloaded, Chrome can invalidate this context.
-      // Swallowing lastError keeps the host page stable until reattach reinstalls the bridge.
-      void chrome.runtime.lastError;
+      source: data.source || null
     });
-  }
+  };
 
-  // Sends listener health events to the background worker for popup status and repair decisions.
-  function forwardListenerStatus(event) {
-    const data = event.detail || {};
-    chrome.runtime.sendMessage({
+  const statusHandler = (event) => {
+    sendRuntimeMessage({
       type: 'LISTENER_STATUS',
-      status: data.status || 'unknown',
-      reason: data.reason || null,
-      timestamp: data.timestamp || new Date().toISOString(),
-      sourceUrl: data.sourceUrl || location.href,
-      pageUrl: data.pageUrl || location.href,
-      attachId: data.attachId || null
-    }, () => {
-      void chrome.runtime.lastError;
+      status: event.detail || null
     });
-  }
+  };
 
-  globalThis[LISTENER_KEY] = forwardConsoleCapture;
-  window.addEventListener('__CONSOLE_LOG_COPIER__', forwardConsoleCapture);
-
-  const STATUS_LISTENER_KEY = '__CONSOLE_LOG_COPIER_STATUS_LISTENER__';
-  if (globalThis[STATUS_LISTENER_KEY]) {
-    window.removeEventListener('__CONSOLE_LOG_COPIER_STATUS__', globalThis[STATUS_LISTENER_KEY]);
-  }
-  globalThis[STATUS_LISTENER_KEY] = forwardListenerStatus;
-  window.addEventListener('__CONSOLE_LOG_COPIER_STATUS__', forwardListenerStatus);
+  window.addEventListener('__CONSOLE_LOG_COPIER__', logHandler);
+  window.addEventListener('__CONSOLE_LOG_COPIER_STATUS__', statusHandler);
+  window[STATE_KEY] = {
+    logHandler,
+    statusHandler,
+    attachedAt: new Date().toISOString()
+  };
 })();
